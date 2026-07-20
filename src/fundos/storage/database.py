@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS investment_mandates (
     max_single_asset_weight REAL NOT NULL CHECK (max_single_asset_weight BETWEEN 0 AND 1),
     min_cash_weight REAL NOT NULL CHECK (min_cash_weight BETWEEN 0 AND 1),
     max_turnover REAL NOT NULL CHECK (max_turnover BETWEEN 0 AND 1),
+    maximum_data_age_days INTEGER NOT NULL DEFAULT 3 CHECK (maximum_data_age_days >= 0),
+    maximum_stress_loss REAL NOT NULL DEFAULT 0.20 CHECK (maximum_stress_loss BETWEEN 0 AND 1),
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -94,6 +96,44 @@ CREATE TABLE IF NOT EXISTS rebalance_records (
     approved_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    run_id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    version_id TEXT NOT NULL UNIQUE REFERENCES portfolio_versions(version_id),
+    state TEXT NOT NULL CHECK (state IN ('proposed', 'risk_passed', 'rejected', 'approved', 'published')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id),
+    rationale TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS risk_checks (
+    check_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+    rule_code TEXT NOT NULL,
+    passed INTEGER NOT NULL CHECK (passed IN (0, 1)),
+    severity TEXT NOT NULL CHECK (severity IN ('hard', 'soft')),
+    actual_value REAL,
+    limit_value REAL,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS committee_decisions (
+    decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id),
+    decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+    rationale TEXT NOT NULL,
+    decided_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -123,6 +163,11 @@ class Database:
                 connection.execute("ALTER TABLE portfolio_versions ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'")
             if "published_at" not in columns:
                 connection.execute("ALTER TABLE portfolio_versions ADD COLUMN published_at TEXT")
+            mandate_columns = {row[1] for row in connection.execute("PRAGMA table_info(investment_mandates)")}
+            if "maximum_data_age_days" not in mandate_columns:
+                connection.execute("ALTER TABLE investment_mandates ADD COLUMN maximum_data_age_days INTEGER NOT NULL DEFAULT 3")
+            if "maximum_stress_loss" not in mandate_columns:
+                connection.execute("ALTER TABLE investment_mandates ADD COLUMN maximum_stress_loss REAL NOT NULL DEFAULT 0.20")
 
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]
@@ -211,20 +256,23 @@ class Database:
                 """
                 INSERT INTO investment_mandates (
                     product_id, objective, risk_level, max_single_asset_weight,
-                    min_cash_weight, max_turnover
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    min_cash_weight, max_turnover, maximum_data_age_days, maximum_stress_loss
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(product_id) DO UPDATE SET
                     objective = excluded.objective,
                     risk_level = excluded.risk_level,
                     max_single_asset_weight = excluded.max_single_asset_weight,
                     min_cash_weight = excluded.min_cash_weight,
                     max_turnover = excluded.max_turnover,
+                    maximum_data_age_days = excluded.maximum_data_age_days,
+                    maximum_stress_loss = excluded.maximum_stress_loss,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
                     mandate.product_id, mandate.objective, mandate.risk_level,
                     float(mandate.max_single_asset_weight), float(mandate.min_cash_weight),
-                    float(mandate.max_turnover),
+                    float(mandate.max_turnover), mandate.maximum_data_age_days,
+                    float(mandate.maximum_stress_loss),
                 ),
             )
 

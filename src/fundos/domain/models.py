@@ -59,6 +59,8 @@ class InvestmentMandate:
     max_single_asset_weight: Decimal
     min_cash_weight: Decimal
     max_turnover: Decimal
+    maximum_data_age_days: int = 3
+    maximum_stress_loss: Decimal = Decimal("0.20")
 
     def __post_init__(self) -> None:
         if not self.objective.strip():
@@ -67,7 +69,9 @@ class InvestmentMandate:
             ("max single asset weight", self.max_single_asset_weight),
             ("minimum cash weight", self.min_cash_weight),
             ("maximum turnover", self.max_turnover),
+            ("maximum stress loss", self.maximum_stress_loss),
         ):
             if not Decimal("0") <= value <= Decimal("1"):
                 raise ValueError(f"{name} must be between 0 and 1")
-
+        if self.maximum_data_age_days < 0:
+            raise ValueError("maximum data age days cannot be negative")
