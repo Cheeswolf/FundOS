@@ -6,7 +6,7 @@
     {"symbol": "NASDAQ100", "name": "纳斯达克100指数", "asset_class": "equity"},
     {"symbol": "GOLD", "name": "黄金资产", "asset_class": "commodity"},
     {"symbol": "BOND", "name": "债券资产", "asset_class": "fixed_income"},
-    {"symbol": "CASH", "name": "现金类资产", "asset_class": "cash"}
+    {"symbol": "CASH", "name": "现金类资产", "asset_class": "cash"},
+    {"symbol": "BALANCED_BENCHMARK", "name": "股债平衡基准", "asset_class": "benchmark"}
   ]
 }
-

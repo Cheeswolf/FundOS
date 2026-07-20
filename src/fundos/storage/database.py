@@ -2,10 +2,11 @@ import sqlite3
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from fundos.domain.models import Asset, PortfolioProduct, PortfolioVersion
+from fundos.domain.models import Asset, PortfolioProduct, PortfolioVersion, PositionWeight
 from fundos.analytics.time_series import DatedNav, DatedPrice
 
 
@@ -55,6 +56,19 @@ CREATE TABLE IF NOT EXISTS portfolio_nav (
     nav_date TEXT NOT NULL,
     nav REAL NOT NULL CHECK (nav > 0),
     PRIMARY KEY (product_id, nav_date)
+);
+
+CREATE TABLE IF NOT EXISTS performance_snapshots (
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    as_of_date TEXT NOT NULL,
+    cumulative_return REAL NOT NULL,
+    benchmark_return REAL NOT NULL,
+    excess_return REAL NOT NULL,
+    annualized_return REAL NOT NULL,
+    annualized_volatility REAL NOT NULL,
+    maximum_drawdown REAL NOT NULL,
+    sharpe_ratio REAL,
+    PRIMARY KEY (product_id, as_of_date)
 );
 """
 
@@ -178,6 +192,72 @@ class Database:
                 VALUES (?, ?, ?)
                 """,
                 [(version.version_id, item.asset_symbol, float(item.weight)) for item in version.weights],
+            )
+
+    def get_portfolio_versions(self, product_id: str) -> list[PortfolioVersion]:
+        rows = self.fetch_all(
+            """
+            SELECT v.version_id, v.product_id, v.version_number, v.effective_date,
+                   w.asset_symbol, w.weight
+            FROM portfolio_versions v
+            JOIN portfolio_version_weights w ON w.version_id = v.version_id
+            WHERE v.product_id = ?
+            ORDER BY v.version_number, w.asset_symbol
+            """,
+            (product_id,),
+        )
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entry = grouped.setdefault(
+                row["version_id"],
+                {
+                    "version_id": row["version_id"],
+                    "product_id": row["product_id"],
+                    "version_number": row["version_number"],
+                    "effective_date": date.fromisoformat(row["effective_date"]),
+                    "weights": [],
+                },
+            )
+            entry["weights"].append(PositionWeight(row["asset_symbol"], Decimal(str(row["weight"]))))
+        return [
+            PortfolioVersion(**{**entry, "weights": tuple(entry["weights"])})
+            for entry in grouped.values()
+        ]
+
+    def upsert_performance_snapshot(
+        self,
+        product_id: str,
+        as_of_date: date,
+        *,
+        cumulative_return: float,
+        benchmark_return: float,
+        annualized_return: float,
+        annualized_volatility: float,
+        maximum_drawdown: float,
+        sharpe_ratio: float | None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO performance_snapshots (
+                    product_id, as_of_date, cumulative_return, benchmark_return,
+                    excess_return, annualized_return, annualized_volatility,
+                    maximum_drawdown, sharpe_ratio
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(product_id, as_of_date) DO UPDATE SET
+                    cumulative_return = excluded.cumulative_return,
+                    benchmark_return = excluded.benchmark_return,
+                    excess_return = excluded.excess_return,
+                    annualized_return = excluded.annualized_return,
+                    annualized_volatility = excluded.annualized_volatility,
+                    maximum_drawdown = excluded.maximum_drawdown,
+                    sharpe_ratio = excluded.sharpe_ratio
+                """,
+                (
+                    product_id, as_of_date.isoformat(), cumulative_return, benchmark_return,
+                    cumulative_return - benchmark_return, annualized_return,
+                    annualized_volatility, maximum_drawdown, sharpe_ratio,
+                ),
             )
 
     def fetch_all(self, query: str, parameters: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
