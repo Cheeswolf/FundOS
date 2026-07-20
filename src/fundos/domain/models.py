@@ -50,3 +50,24 @@ class PortfolioVersion:
         if abs(total - Decimal("1")) > Decimal("0.0001"):
             raise ValueError("portfolio weights must sum to 1")
 
+
+@dataclass(frozen=True, slots=True)
+class InvestmentMandate:
+    product_id: str
+    objective: str
+    risk_level: str
+    max_single_asset_weight: Decimal
+    min_cash_weight: Decimal
+    max_turnover: Decimal
+
+    def __post_init__(self) -> None:
+        if not self.objective.strip():
+            raise ValueError("investment objective cannot be empty")
+        for name, value in (
+            ("max single asset weight", self.max_single_asset_weight),
+            ("minimum cash weight", self.min_cash_weight),
+            ("maximum turnover", self.max_turnover),
+        ):
+            if not Decimal("0") <= value <= Decimal("1"):
+                raise ValueError(f"{name} must be between 0 and 1")
+

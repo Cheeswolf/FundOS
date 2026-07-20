@@ -6,7 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from fundos.domain.models import Asset, PortfolioProduct, PortfolioVersion, PositionWeight
+from fundos.domain.models import Asset, InvestmentMandate, PortfolioProduct, PortfolioVersion, PositionWeight
 from fundos.analytics.time_series import DatedNav, DatedPrice
 
 
@@ -35,11 +35,23 @@ CREATE TABLE IF NOT EXISTS portfolio_products (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS investment_mandates (
+    product_id TEXT PRIMARY KEY REFERENCES portfolio_products(product_id),
+    objective TEXT NOT NULL,
+    risk_level TEXT NOT NULL,
+    max_single_asset_weight REAL NOT NULL CHECK (max_single_asset_weight BETWEEN 0 AND 1),
+    min_cash_weight REAL NOT NULL CHECK (min_cash_weight BETWEEN 0 AND 1),
+    max_turnover REAL NOT NULL CHECK (max_turnover BETWEEN 0 AND 1),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS portfolio_versions (
     version_id TEXT PRIMARY KEY,
     product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
     version_number INTEGER NOT NULL CHECK (version_number > 0),
     effective_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'cancelled')),
+    published_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (product_id, version_number)
 );
@@ -70,6 +82,18 @@ CREATE TABLE IF NOT EXISTS performance_snapshots (
     sharpe_ratio REAL,
     PRIMARY KEY (product_id, as_of_date)
 );
+
+CREATE TABLE IF NOT EXISTS rebalance_records (
+    rebalance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    previous_version_id TEXT REFERENCES portfolio_versions(version_id),
+    new_version_id TEXT NOT NULL REFERENCES portfolio_versions(version_id),
+    effective_date TEXT NOT NULL,
+    turnover REAL NOT NULL CHECK (turnover >= 0),
+    reason TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -94,6 +118,11 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(portfolio_versions)")}
+            if "status" not in columns:
+                connection.execute("ALTER TABLE portfolio_versions ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'")
+            if "published_at" not in columns:
+                connection.execute("ALTER TABLE portfolio_versions ADD COLUMN published_at TEXT")
 
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]
@@ -176,6 +205,29 @@ class Database:
                 (product.product_id, product.name, product.benchmark_symbol, product.created_at.isoformat()),
             )
 
+    def upsert_investment_mandate(self, mandate: InvestmentMandate) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO investment_mandates (
+                    product_id, objective, risk_level, max_single_asset_weight,
+                    min_cash_weight, max_turnover
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(product_id) DO UPDATE SET
+                    objective = excluded.objective,
+                    risk_level = excluded.risk_level,
+                    max_single_asset_weight = excluded.max_single_asset_weight,
+                    min_cash_weight = excluded.min_cash_weight,
+                    max_turnover = excluded.max_turnover,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    mandate.product_id, mandate.objective, mandate.risk_level,
+                    float(mandate.max_single_asset_weight), float(mandate.min_cash_weight),
+                    float(mandate.max_turnover),
+                ),
+            )
+
     def create_version(self, version: PortfolioVersion) -> None:
         with self.connect() as connection:
             connection.execute(
@@ -194,14 +246,16 @@ class Database:
                 [(version.version_id, item.asset_symbol, float(item.weight)) for item in version.weights],
             )
 
-    def get_portfolio_versions(self, product_id: str) -> list[PortfolioVersion]:
+    def get_portfolio_versions(self, product_id: str, *, published_only: bool = False) -> list[PortfolioVersion]:
+        status_clause = "AND v.status = 'published'" if published_only else ""
         rows = self.fetch_all(
-            """
+            f"""
             SELECT v.version_id, v.product_id, v.version_number, v.effective_date,
                    w.asset_symbol, w.weight
             FROM portfolio_versions v
             JOIN portfolio_version_weights w ON w.version_id = v.version_id
             WHERE v.product_id = ?
+            {status_clause}
             ORDER BY v.version_number, w.asset_symbol
             """,
             (product_id,),

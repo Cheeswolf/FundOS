@@ -22,7 +22,7 @@ def calculate_and_store_versioned_performance(
     periods_per_year: int = 252,
     annual_risk_free_rate: float = 0.0,
 ) -> PerformanceResult:
-    versions = database.get_portfolio_versions(product_id)
+    versions = database.get_portfolio_versions(product_id, published_only=True)
     portfolio_symbols = sorted({position.asset_symbol for version in versions for position in version.weights})
     all_symbols = [*portfolio_symbols, benchmark_symbol]
     dates, aligned = align_prices(database.get_prices(provider, all_symbols), all_symbols)
@@ -60,4 +60,3 @@ def calculate_and_store_versioned_performance(
         benchmark_return,
         metrics.cumulative_return - benchmark_return,
     )
-

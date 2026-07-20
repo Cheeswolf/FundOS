@@ -8,7 +8,8 @@ PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from fundos.analytics import calculate_metrics, calculate_nav, calculate_portfolio_returns  # noqa: E402
-from fundos.domain import Asset, PortfolioProduct, PortfolioVersion, PositionWeight  # noqa: E402
+from fundos.domain import Asset, InvestmentMandate, PortfolioProduct, PortfolioVersion, PositionWeight  # noqa: E402
+from fundos.services import publish_portfolio_version  # noqa: E402
 from fundos.storage import Database  # noqa: E402
 
 
@@ -30,6 +31,21 @@ def main() -> None:
     existing = database.fetch_all("SELECT product_id FROM portfolio_products WHERE product_id = ?", (product.product_id,))
     if not existing:
         database.create_product(product)
+    database.upsert_investment_mandate(
+        InvestmentMandate(
+            product.product_id,
+            "中长期多资产稳健增值",
+            "medium",
+            Decimal("0.35"),
+            Decimal("0.05"),
+            Decimal("0.30"),
+        )
+    )
+    version_rows = database.fetch_all(
+        "SELECT status FROM portfolio_versions WHERE version_id = ?",
+        ("fundos-index-allocation-v1",),
+    )
+    if not version_rows:
         database.create_version(
             PortfolioVersion(
                 version_id="fundos-index-allocation-v1",
@@ -45,6 +61,17 @@ def main() -> None:
                     PositionWeight("CASH", Decimal("0.05")),
                 ),
             )
+        )
+        version_rows = database.fetch_all(
+            "SELECT status FROM portfolio_versions WHERE version_id = ?",
+            ("fundos-index-allocation-v1",),
+        )
+    if version_rows[0]["status"] == "draft":
+        publish_portfolio_version(
+            database,
+            version_id="fundos-index-allocation-v1",
+            reason="发布初始战略资产配置",
+            approved_by="initial-committee",
         )
 
     sample_returns = {
@@ -66,4 +93,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
