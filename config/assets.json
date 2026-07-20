@@ -1,0 +1,12 @@
+{
+  "benchmark": "BALANCED_BENCHMARK",
+  "assets": [
+    {"symbol": "CSI300", "name": "沪深300指数", "asset_class": "equity"},
+    {"symbol": "CSI500", "name": "中证500指数", "asset_class": "equity"},
+    {"symbol": "NASDAQ100", "name": "纳斯达克100指数", "asset_class": "equity"},
+    {"symbol": "GOLD", "name": "黄金资产", "asset_class": "commodity"},
+    {"symbol": "BOND", "name": "债券资产", "asset_class": "fixed_income"},
+    {"symbol": "CASH", "name": "现金类资产", "asset_class": "cash"}
+  ]
+}
+
