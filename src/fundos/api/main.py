@@ -9,6 +9,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from fundos.api.schemas import (
     AssetInput,
@@ -115,6 +116,10 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    def dashboard() -> str:
+        return (Path(__file__).with_name("dashboard.html")).read_text(encoding="utf-8")
 
     @app.get("/products", tags=["portfolios"])
     def list_products(db: Database = Depends(get_database)) -> list[dict[str, Any]]:
@@ -338,6 +343,27 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             "risk_checks": checks,
             "committee_decision": dict(decision[0]) if decision else None,
         }
+
+    @app.get("/products/{product_id}/workflows", tags=["workflow"])
+    def list_product_workflows(product_id: str, db: Database = Depends(get_database)) -> list[dict[str, Any]]:
+        runs = db.fetch_all(
+            "SELECT * FROM workflow_runs WHERE product_id = ? ORDER BY created_at DESC",
+            (product_id,),
+        )
+        result = []
+        for run in runs:
+            run_id = run["run_id"]
+            proposal = db.fetch_all("SELECT * FROM portfolio_proposals WHERE run_id = ?", (run_id,))
+            decision = db.fetch_all("SELECT * FROM committee_decisions WHERE run_id = ?", (run_id,))
+            result.append({
+                "run": dict(run),
+                "proposal": dict(proposal[0]) if proposal else None,
+                "risk_checks": _rows(db.fetch_all(
+                    "SELECT * FROM risk_checks WHERE run_id = ? ORDER BY check_id", (run_id,)
+                )),
+                "committee_decision": dict(decision[0]) if decision else None,
+            })
+        return result
 
     @app.get("/products/{product_id}/reviews", tags=["reviews"])
     def list_reviews(product_id: str, db: Database = Depends(get_database)) -> list[dict[str, Any]]:

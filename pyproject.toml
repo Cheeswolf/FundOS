@@ -20,5 +20,8 @@ test = ["httpx>=0.27,<1"]
 [project.scripts]
 fundos-api = "fundos.api.main:run"
 
+[tool.setuptools.package-data]
+"fundos.api" = ["*.html"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
