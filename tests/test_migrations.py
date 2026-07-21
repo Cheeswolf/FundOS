@@ -13,12 +13,11 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             database = Database(Path(directory) / "migration.sqlite3")
             database.initialize()
-            self.assertEqual(database.get_schema_version(), 2)
+            self.assertEqual(database.get_schema_version(), 3)
             database.initialize()
             migrations = database.fetch_all("SELECT * FROM schema_migrations ORDER BY version")
-            self.assertEqual([row["version"] for row in migrations], [1, 2])
+            self.assertEqual([row["version"] for row in migrations], [1, 2, 3])
 
 
 if __name__ == "__main__":
     unittest.main()
-

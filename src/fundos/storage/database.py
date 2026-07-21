@@ -268,6 +268,22 @@ CREATE TABLE IF NOT EXISTS alert_events (
     delivered_at TEXT,
     UNIQUE (source_type, source_id)
 );
+
+CREATE TABLE IF NOT EXISTS model_calls (
+    call_id TEXT PRIMARY KEY,
+    purpose TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+    attempts INTEGER NOT NULL CHECK (attempts > 0),
+    latency_ms INTEGER NOT NULL CHECK (latency_ms >= 0),
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    estimated_cost_usd REAL CHECK (estimated_cost_usd IS NULL OR estimated_cost_usd >= 0),
+    prompt_sha256 TEXT NOT NULL,
+    error_message TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 

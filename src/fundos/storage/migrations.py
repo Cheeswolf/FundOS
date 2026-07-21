@@ -43,9 +43,31 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         if "research_report_id" not in proposal_columns:
             target.execute("ALTER TABLE portfolio_proposals ADD COLUMN research_report_id TEXT")
 
+    def add_model_call_audit(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS model_calls (
+                call_id TEXT PRIMARY KEY,
+                purpose TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+                attempts INTEGER NOT NULL CHECK (attempts > 0),
+                latency_ms INTEGER NOT NULL CHECK (latency_ms >= 0),
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                estimated_cost_usd REAL CHECK (estimated_cost_usd IS NULL OR estimated_cost_usd >= 0),
+                prompt_sha256 TEXT NOT NULL,
+                error_message TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
+        Migration(3, "add_model_call_audit", add_model_call_audit),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:
@@ -57,4 +79,3 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             (migration.version, migration.name),
         )
     return migrations[-1].version
-

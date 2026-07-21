@@ -59,8 +59,8 @@ class ResearchAgent:
             ensure_ascii=False,
         )
         try:
-            content = self.model.complete(system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt)
-            payload = self._parse_object(content)
+            completion = self.model.complete(system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt)
+            payload = self._parse_object(completion.content)
             views = tuple(self._parse_view(item) for item in payload["asset_views"])
             report = ResearchReport(
                 report_id=report_id,

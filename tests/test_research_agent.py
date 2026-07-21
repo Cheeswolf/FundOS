@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fundos.agents import ResearchAgent, ResearchAgentError  # noqa: E402
+from fundos.agents import ModelCompletion, ResearchAgent, ResearchAgentError  # noqa: E402
 from fundos.domain import ResearchEvidence  # noqa: E402
 
 
@@ -17,7 +17,7 @@ class FakeModel:
 
     def complete(self, *, system_prompt: str, user_prompt: str) -> str:
         self.prompts.append((system_prompt, user_prompt))
-        return self.response
+        return ModelCompletion(self.response)
 
 
 class ResearchAgentTests(unittest.TestCase):

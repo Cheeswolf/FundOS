@@ -10,7 +10,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from fundos.agents import OpenAICompatibleProvider, ResearchAgent  # noqa: E402
+from fundos.agents import AuditedLanguageModel, OpenAICompatibleProvider, ResearchAgent  # noqa: E402
 from fundos.domain import ResearchEvidence  # noqa: E402
 from fundos.services import create_research_report  # noqa: E402
 from fundos.storage import Database  # noqa: E402
@@ -38,15 +38,25 @@ def main() -> None:
         )
         for item in configuration["evidence"]
     )
-    report = ResearchAgent(provider).draft_report(
+    database = Database(arguments.database)
+    database.initialize()
+    audited_provider = AuditedLanguageModel(
+        model=provider,
+        database=database,
+        call_id=f"research:{configuration['report_id']}",
+        purpose="research_draft",
+        provider_name=os.environ.get("FUNDOS_LLM_PROVIDER", "openai-compatible"),
+        model_name=os.environ.get("FUNDOS_LLM_MODEL", ""),
+        input_cost_per_million=float(os.environ.get("FUNDOS_LLM_INPUT_COST_PER_MILLION", "0")),
+        output_cost_per_million=float(os.environ.get("FUNDOS_LLM_OUTPUT_COST_PER_MILLION", "0")),
+    )
+    report = ResearchAgent(audited_provider).draft_report(
         report_id=configuration["report_id"],
         product_id=configuration["product_id"],
         as_of_date=date.fromisoformat(configuration["as_of_date"]),
         asset_symbols=tuple(configuration["asset_symbols"]),
         evidence=evidence,
     )
-    database = Database(arguments.database)
-    database.initialize()
     create_research_report(database, report)
     print(json.dumps({"report_id": report.report_id, "status": "draft"}))
 
