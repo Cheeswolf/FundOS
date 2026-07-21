@@ -110,3 +110,7 @@ docker compose up --build -d
 ```
 
 服务启动时自动执行版本化数据库迁移，SQLite 数据保存在独立卷中。生产管道输出 JSON 结构化日志，可由容器日志平台直接采集。
+
+## 持续集成
+
+GitHub Actions 会在 `main` 分支推送及 Pull Request 上自动执行完整测试、源码编译检查和 Docker 镜像构建。Dependabot 每周检查 Python、GitHub Actions 和 Docker 基础镜像更新。
