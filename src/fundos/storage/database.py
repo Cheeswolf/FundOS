@@ -312,6 +312,17 @@ CREATE TABLE IF NOT EXISTS api_audit_events (
     outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'rejected', 'failed')),
     status_code INTEGER NOT NULL,
     client_ip TEXT,
+    created_at TEXT NOT NULL,
+    previous_hash TEXT NOT NULL,
+    event_hash TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS audit_retention_anchors (
+    anchor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cutoff_at TEXT NOT NULL,
+    anchor_audit_id TEXT NOT NULL,
+    anchor_hash TEXT NOT NULL,
+    deleted_count INTEGER NOT NULL CHECK (deleted_count > 0),
     created_at TEXT NOT NULL
 );
 """

@@ -145,3 +145,6 @@ python scripts/generate_research.py path\to\research-input.json
 提案及风险审查；投委会决策、组合发布、告警处置和模型熔断重置仅允许 `admin`。
 所有修改型 API 请求都会写入审计日志；`GET /audit-events` 仅允许 `admin` 查询。
 日志保存密钥指纹、角色、路径、结果和请求 ID，不保存密钥或请求正文。
+管理员可通过 `/audit-events/integrity` 校验哈希链，通过 `/audit-events/export.csv`
+导出记录，并通过 `POST /audit-events/retention?days=365` 执行保留策略。清理至少保留
+30 天，且会保存链锚点以继续验证剩余记录。

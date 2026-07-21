@@ -2,6 +2,7 @@
 
 from .nav_service import calculate_and_store_nav
 from .alerts import AlertDeliveryResult, create_alert, deliver_pending_alerts
+from .audit_log import purge_audit_events, record_audit_event, verify_audit_chain
 from .operations import OperationsCycleResult, run_operations_cycle
 from .model_operations import get_model_circuit_status, reset_model_circuit, update_alert_lifecycle
 from .pipeline import PipelineResult, run_production_pipeline
@@ -25,6 +26,9 @@ __all__ = [
     "AlertDeliveryResult",
     "create_alert",
     "deliver_pending_alerts",
+    "purge_audit_events",
+    "record_audit_event",
+    "verify_audit_chain",
     "OperationsCycleResult",
     "run_operations_cycle",
     "get_model_circuit_status",

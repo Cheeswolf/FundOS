@@ -1,4 +1,6 @@
 import sqlite3
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -103,12 +105,49 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_audit_integrity_chain(target: sqlite3.Connection) -> None:
+        columns = {row[1] for row in target.execute("PRAGMA table_info(api_audit_events)")}
+        if "previous_hash" not in columns:
+            target.execute("ALTER TABLE api_audit_events ADD COLUMN previous_hash TEXT")
+        if "event_hash" not in columns:
+            target.execute("ALTER TABLE api_audit_events ADD COLUMN event_hash TEXT")
+        fields = (
+            "audit_id", "request_id", "method", "path", "actor_id", "actor_role",
+            "outcome", "status_code", "client_ip", "created_at",
+        )
+        previous_hash = ""
+        for row in target.execute("SELECT * FROM api_audit_events ORDER BY created_at, audit_id").fetchall():
+            item = dict(row)
+            canonical = json.dumps(
+                {field: item.get(field) for field in fields},
+                sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            )
+            digest = hashlib.sha256(f"{previous_hash}\n{canonical}".encode("utf-8")).hexdigest()
+            target.execute(
+                "UPDATE api_audit_events SET previous_hash = ?, event_hash = ? WHERE audit_id = ?",
+                (previous_hash, digest, item["audit_id"]),
+            )
+            previous_hash = digest
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_retention_anchors (
+                anchor_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cutoff_at TEXT NOT NULL,
+                anchor_audit_id TEXT NOT NULL,
+                anchor_hash TEXT NOT NULL,
+                deleted_count INTEGER NOT NULL CHECK (deleted_count > 0),
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
         Migration(3, "add_model_call_audit", add_model_call_audit),
         Migration(4, "add_model_operations_control", add_model_operations_control),
         Migration(5, "add_api_audit_log", add_api_audit_log),
+        Migration(6, "add_audit_integrity_chain", add_audit_integrity_chain),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

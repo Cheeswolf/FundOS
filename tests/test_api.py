@@ -211,6 +211,24 @@ class ApiTests(unittest.TestCase):
                     200,
                 )
 
+    def test_admin_can_verify_export_and_apply_audit_retention(self) -> None:
+        self.client.post(
+            "/assets", headers=self.write_headers,
+            json=[{"symbol": "EXPORT", "name": "Export Asset", "asset_class": "cash"}],
+        )
+        integrity = self.client.get("/audit-events/integrity", headers=self.write_headers)
+        self.assertEqual(integrity.status_code, 200)
+        self.assertTrue(integrity.json()["valid"])
+        exported = self.client.get("/audit-events/export.csv", headers=self.write_headers)
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn("text/csv", exported.headers["content-type"])
+        self.assertIn("audit_id,request_id", exported.text)
+        retention = self.client.post(
+            "/audit-events/retention?days=365", headers=self.write_headers,
+        )
+        self.assertEqual(retention.status_code, 200)
+        self.assertEqual(retention.json()["retention_days"], 365)
+
     def test_complete_write_workflow(self) -> None:
         assets = self.client.post("/assets", headers=self.write_headers, json=[
             {"symbol": "EQUITY", "name": "Equity", "asset_class": "equity"},

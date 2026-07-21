@@ -1,4 +1,6 @@
 import os
+import csv
+import io
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -11,7 +13,7 @@ from uuid import uuid4
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from fundos.api.schemas import (
     AssetInput,
@@ -40,10 +42,13 @@ from fundos.services import (
     finalize_research_report,
     get_model_circuit_status,
     publish_approved_workflow,
+    purge_audit_events,
+    record_audit_event,
     record_committee_decision,
     reset_model_circuit,
     run_risk_review,
     update_alert_lifecycle,
+    verify_audit_chain,
 )
 from fundos.storage import Database
 
@@ -152,21 +157,14 @@ def create_app(
             return response
         finally:
             outcome = "succeeded" if status_code < 400 else "rejected" if status_code < 500 else "failed"
-            with database.connect() as connection:
-                connection.execute(
-                    """
-                    INSERT INTO api_audit_events (
-                        audit_id, request_id, method, path, actor_id, actor_role,
-                        outcome, status_code, client_ip, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(uuid4()), request_id, request.method, request.url.path,
-                        request.state.actor_id, request.state.actor_role, outcome, status_code,
-                        request.client.host if request.client else None,
-                        datetime.now(timezone.utc).isoformat(),
-                    ),
-                )
+            record_audit_event(database, {
+                "audit_id": str(uuid4()), "request_id": request_id,
+                "method": request.method, "path": request.url.path,
+                "actor_id": request.state.actor_id, "actor_role": request.state.actor_role,
+                "outcome": outcome, "status_code": status_code,
+                "client_ip": request.client.host if request.client else None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
 
     def require_role(minimum_role: str):
         required_level = {"operator": 1, "admin": 2}[minimum_role]
@@ -565,6 +563,32 @@ def create_app(
         return _rows(db.fetch_all(
             "SELECT * FROM api_audit_events ORDER BY created_at DESC LIMIT ?", (limit,)
         ))
+
+    @app.get("/audit-events/integrity", tags=["security"], dependencies=[Depends(require_admin)])
+    def audit_integrity(db: Database = Depends(get_database)) -> dict[str, Any]:
+        return verify_audit_chain(db)
+
+    @app.get("/audit-events/export.csv", tags=["security"], dependencies=[Depends(require_admin)])
+    def export_audit_events(db: Database = Depends(get_database)) -> StreamingResponse:
+        rows = db.fetch_all("SELECT * FROM api_audit_events ORDER BY created_at, audit_id")
+        output = io.StringIO()
+        columns = [item[1] for item in db.fetch_all("PRAGMA table_info(api_audit_events)")]
+        writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(dict(row) for row in rows)
+        return StreamingResponse(
+            iter([output.getvalue()]), media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=fundos-audit-events.csv"},
+        )
+
+    @app.post(
+        "/audit-events/retention", tags=["security"], dependencies=[Depends(require_admin)],
+    )
+    def apply_audit_retention(
+        days: int = Query(default=365, ge=30, le=3650),
+        db: Database = Depends(get_database),
+    ) -> dict[str, int]:
+        return {"retention_days": days, "deleted_events": purge_audit_events(db, retention_days=days)}
 
     @app.get("/products/{product_id}/research", tags=["research"])
     def list_research(product_id: str, db: Database = Depends(get_database)) -> list[dict[str, Any]]:
