@@ -313,6 +313,20 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
         ))
         return {"nav": nav, "snapshots": snapshots}
 
+    @app.get("/products/{product_id}/operations", tags=["operations"])
+    def list_operations_cycles(
+        product_id: str,
+        limit: int = Query(default=30, ge=1, le=365),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        return _rows(db.fetch_all(
+            """
+            SELECT * FROM operations_cycles
+            WHERE product_id = ? ORDER BY as_of_date DESC LIMIT ?
+            """,
+            (product_id, limit),
+        ))
+
     @app.get("/products/{product_id}/research", tags=["research"])
     def list_research(product_id: str, db: Database = Depends(get_database)) -> list[dict[str, Any]]:
         reports = _rows(db.fetch_all(

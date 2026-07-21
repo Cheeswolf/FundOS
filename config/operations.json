@@ -1,0 +1,10 @@
+{
+  "portfolios": [
+    {
+      "product_id": "fundos-demo-balanced",
+      "provider": "demo-synthetic",
+      "benchmark_symbol": "BALANCED_BENCHMARK"
+    }
+  ]
+}
+

@@ -211,6 +211,22 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
     response_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS operations_cycles (
+    cycle_id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    as_of_date TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('healthy', 'attention_required', 'blocked')),
+    latest_data_date TEXT,
+    data_age_days INTEGER,
+    performance_updated INTEGER NOT NULL CHECK (performance_updated IN (0, 1)),
+    weekly_decision_due INTEGER NOT NULL CHECK (weekly_decision_due IN (0, 1)),
+    monthly_review_due INTEGER NOT NULL CHECK (monthly_review_due IN (0, 1)),
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (product_id, as_of_date)
+);
 """
 
 
