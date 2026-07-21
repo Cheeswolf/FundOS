@@ -284,6 +284,23 @@ CREATE TABLE IF NOT EXISTS model_calls (
     error_message TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS model_circuit_resets (
+    reset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    reset_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    reset_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alert_lifecycle (
+    alert_id TEXT PRIMARY KEY REFERENCES alert_events(alert_id),
+    state TEXT NOT NULL CHECK (state IN ('acknowledged', 'resolved')),
+    updated_by TEXT NOT NULL,
+    note TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 

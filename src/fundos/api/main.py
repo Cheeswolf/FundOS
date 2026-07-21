@@ -13,6 +13,8 @@ from fastapi.responses import HTMLResponse
 
 from fundos.api.schemas import (
     AssetInput,
+    AlertLifecycleInput,
+    CircuitResetInput,
     CommitteeDecisionInput,
     PriceBatchInput,
     ProductCreate,
@@ -34,9 +36,12 @@ from fundos.services import (
     create_proposal,
     create_research_report,
     finalize_research_report,
+    get_model_circuit_status,
     publish_approved_workflow,
     record_committee_decision,
+    reset_model_circuit,
     run_risk_review,
+    update_alert_lifecycle,
 )
 from fundos.storage import Database
 
@@ -352,12 +357,74 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             raise HTTPException(status_code=422, detail="invalid alert status")
         if status:
             return _rows(db.fetch_all(
-                "SELECT * FROM alert_events WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                """SELECT a.*, l.state AS lifecycle_state, l.updated_by, l.note, l.updated_at
+                FROM alert_events a LEFT JOIN alert_lifecycle l ON l.alert_id = a.alert_id
+                WHERE a.status = ? ORDER BY a.created_at DESC LIMIT ?""",
                 (status, limit),
             ))
         return _rows(db.fetch_all(
-            "SELECT * FROM alert_events ORDER BY created_at DESC LIMIT ?", (limit,)
+            """SELECT a.*, l.state AS lifecycle_state, l.updated_by, l.note, l.updated_at
+            FROM alert_events a LEFT JOIN alert_lifecycle l ON l.alert_id = a.alert_id
+            ORDER BY a.created_at DESC LIMIT ?""", (limit,)
         ))
+
+    @app.post(
+        "/alerts/{alert_id}/acknowledge", tags=["operations"],
+        dependencies=[Depends(require_write_access)],
+    )
+    def acknowledge_alert(
+        alert_id: str, payload: AlertLifecycleInput, db: Database = Depends(get_database)
+    ) -> dict[str, str]:
+        try:
+            state = update_alert_lifecycle(
+                db, alert_id=alert_id, state="acknowledged",
+                updated_by=payload.updated_by, note=payload.note,
+            )
+        except ValueError as error:
+            raise _domain_error(error) from error
+        return {"alert_id": alert_id, "lifecycle_state": state}
+
+    @app.post(
+        "/alerts/{alert_id}/resolve", tags=["operations"],
+        dependencies=[Depends(require_write_access)],
+    )
+    def resolve_alert(
+        alert_id: str, payload: AlertLifecycleInput, db: Database = Depends(get_database)
+    ) -> dict[str, str]:
+        try:
+            state = update_alert_lifecycle(
+                db, alert_id=alert_id, state="resolved",
+                updated_by=payload.updated_by, note=payload.note,
+            )
+        except ValueError as error:
+            raise _domain_error(error) from error
+        return {"alert_id": alert_id, "lifecycle_state": state}
+
+    @app.get("/model-policy/status", tags=["ai-operations"])
+    def model_policy_status(
+        provider: str = Query(min_length=1), model: str = Query(min_length=1),
+        db: Database = Depends(get_database),
+    ) -> dict[str, Any]:
+        threshold = int(os.environ.get("FUNDOS_LLM_CIRCUIT_FAILURE_THRESHOLD", "3"))
+        return get_model_circuit_status(
+            db, provider=provider, model=model, failure_threshold=max(1, threshold),
+        )
+
+    @app.post(
+        "/model-policy/circuit-reset", tags=["ai-operations"],
+        dependencies=[Depends(require_write_access)],
+    )
+    def reset_circuit(
+        payload: CircuitResetInput, db: Database = Depends(get_database)
+    ) -> dict[str, Any]:
+        try:
+            reset_id = reset_model_circuit(
+                db, provider=payload.provider, model=payload.model,
+                reset_by=payload.reset_by, reason=payload.reason,
+            )
+        except ValueError as error:
+            raise _domain_error(error) from error
+        return {"reset_id": reset_id, "state": "closed"}
 
     @app.get("/model-calls/summary", tags=["ai-operations"])
     def model_call_summary(

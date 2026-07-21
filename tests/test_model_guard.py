@@ -10,6 +10,7 @@ from fundos.agents import (  # noqa: E402
     GuardedLanguageModel, ModelCallBlocked, ModelCompletion,
 )
 from fundos.storage import Database  # noqa: E402
+from fundos.services import reset_model_circuit  # noqa: E402
 
 
 class CountingModel:
@@ -86,5 +87,15 @@ class ModelGuardTests(unittest.TestCase):
         self.insert_call("F1", "failed")
         self.insert_call("F2", "failed")
         self.insert_call("S1", "succeeded")
+        self.guard().complete(system_prompt="s", user_prompt="u")
+        self.assertEqual(self.model.calls, 1)
+
+    def test_manual_reset_allows_call_after_open_circuit(self) -> None:
+        for index in range(3):
+            self.insert_call(f"RF{index}", "failed")
+        reset_model_circuit(
+            self.database, provider="fixture", model="model-a",
+            reset_by="operator", reason="Recovery verified",
+        )
         self.guard().complete(system_prompt="s", user_prompt="u")
         self.assertEqual(self.model.calls, 1)

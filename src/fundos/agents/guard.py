@@ -51,13 +51,22 @@ class GuardedLanguageModel:
                 message=f"Daily model token budget reached: {usage['tokens']} / {self.max_daily_tokens}",
             )
         if self.circuit_failure_threshold:
+            resets = self.database.fetch_all(
+                """
+                SELECT reset_at FROM model_circuit_resets
+                WHERE provider = ? AND model = ? ORDER BY reset_at DESC LIMIT 1
+                """,
+                (self.provider_name, self.model_name),
+            )
+            reset_at = resets[0]["reset_at"] if resets else ""
             recent = self.database.fetch_all(
                 """
                 SELECT status FROM model_calls
                 WHERE provider = ? AND model = ?
-                ORDER BY created_at DESC LIMIT ?
+                  AND datetime(created_at) > COALESCE(datetime(?), '0001-01-01 00:00:00')
+                ORDER BY datetime(created_at) DESC LIMIT ?
                 """,
-                (self.provider_name, self.model_name, self.circuit_failure_threshold),
+                (self.provider_name, self.model_name, reset_at, self.circuit_failure_threshold),
             )
             if len(recent) == self.circuit_failure_threshold and all(
                 row["status"] == "failed" for row in recent

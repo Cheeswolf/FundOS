@@ -79,6 +79,50 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("prompt_sha256", calls[0])
         self.assertEqual(self.client.get("/model-calls?status=unknown").status_code, 422)
 
+    def test_admin_controls_model_circuit_and_alert_lifecycle(self) -> None:
+        for index in range(3):
+            with self.app.state.database.connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO model_calls (
+                        call_id, purpose, provider, model, status, attempts, latency_ms,
+                        prompt_sha256, created_at
+                    ) VALUES (?, 'research', 'fixture', 'model-a', 'failed', 1, 1, 'hash', ?)
+                    """,
+                    (f"FAIL{index}", datetime.now().astimezone().isoformat()),
+                )
+        status = self.client.get("/model-policy/status?provider=fixture&model=model-a")
+        self.assertEqual(status.json()["state"], "open")
+        self.assertEqual(self.client.post("/model-policy/circuit-reset", json={
+            "provider": "fixture", "model": "model-a", "reset_by": "admin", "reason": "recovered",
+        }).status_code, 401)
+        reset = self.client.post("/model-policy/circuit-reset", headers=self.write_headers, json={
+            "provider": "fixture", "model": "model-a", "reset_by": "admin", "reason": "recovered",
+        })
+        self.assertEqual(reset.json()["state"], "closed")
+        self.assertEqual(
+            self.client.get("/model-policy/status?provider=fixture&model=model-a").json()["state"],
+            "closed",
+        )
+
+        from fundos.services import create_alert
+        alert_id = create_alert(
+            self.app.state.database, source_type="model_policy", source_id="test-alert",
+            severity="warning", title="Budget reached", message="Review usage",
+        )
+        acknowledged = self.client.post(
+            f"/alerts/{alert_id}/acknowledge", headers=self.write_headers,
+            json={"updated_by": "admin", "note": "reviewing"},
+        )
+        self.assertEqual(acknowledged.json()["lifecycle_state"], "acknowledged")
+        resolved = self.client.post(
+            f"/alerts/{alert_id}/resolve", headers=self.write_headers,
+            json={"updated_by": "admin", "note": "usage approved"},
+        )
+        self.assertEqual(resolved.json()["lifecycle_state"], "resolved")
+        listed = self.client.get("/alerts").json()
+        self.assertEqual(listed[0]["lifecycle_state"], "resolved")
+
     def test_write_endpoints_require_api_key(self) -> None:
         response = self.client.post("/assets", json=[
             {"symbol": "A", "name": "Asset", "asset_class": "equity"}

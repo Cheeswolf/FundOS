@@ -64,10 +64,32 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_model_operations_control(target: sqlite3.Connection) -> None:
+        target.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS model_circuit_resets (
+                reset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                reset_by TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                reset_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS alert_lifecycle (
+                alert_id TEXT PRIMARY KEY REFERENCES alert_events(alert_id),
+                state TEXT NOT NULL CHECK (state IN ('acknowledged', 'resolved')),
+                updated_by TEXT NOT NULL,
+                note TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
         Migration(3, "add_model_call_audit", add_model_call_audit),
+        Migration(4, "add_model_operations_control", add_model_operations_control),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

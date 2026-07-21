@@ -3,6 +3,7 @@
 from .nav_service import calculate_and_store_nav
 from .alerts import AlertDeliveryResult, create_alert, deliver_pending_alerts
 from .operations import OperationsCycleResult, run_operations_cycle
+from .model_operations import get_model_circuit_status, reset_model_circuit, update_alert_lifecycle
 from .pipeline import PipelineResult, run_production_pipeline
 from .publication import PublicationResult, publish_portfolio_version
 from .research import create_research_report, finalize_research_report
@@ -26,6 +27,9 @@ __all__ = [
     "deliver_pending_alerts",
     "OperationsCycleResult",
     "run_operations_cycle",
+    "get_model_circuit_status",
+    "reset_model_circuit",
+    "update_alert_lifecycle",
     "PipelineResult",
     "run_production_pipeline",
     "calculate_and_store_versioned_performance",

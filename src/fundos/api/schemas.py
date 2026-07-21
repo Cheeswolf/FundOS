@@ -91,3 +91,14 @@ class CommitteeDecisionInput(BaseModel):
     rationale: str = Field(min_length=1)
     decided_by: str = Field(min_length=1)
 
+
+class CircuitResetInput(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    reset_by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class AlertLifecycleInput(BaseModel):
+    updated_by: str = Field(min_length=1)
+    note: str = Field(min_length=1)
