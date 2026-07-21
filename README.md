@@ -91,3 +91,11 @@ $env:ALPHA_VANTAGE_API_KEY = "your-key"
 ```
 
 MVP 配置使用 ETF 作为资产类别代理，映射关系位于 `config/market_data.alpha_vantage.json`。这些代理价格不等同于指数点位或场外基金净值，正式组合上线前需要替换为获得授权且与产品说明书一致的数据源。
+
+生产周期可以合并执行行情同步与运营检查：
+
+```powershell
+.\.venv\bin\python.exe scripts/run_production.py --attempts 3
+```
+
+每个资产同步步骤会按指数退避进行有限重试。管道运行及步骤结果保存在 `pipeline_runs` 和 `pipeline_steps`，部分失败会返回非零退出码，便于系统定时任务触发告警。

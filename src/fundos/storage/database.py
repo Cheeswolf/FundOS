@@ -227,6 +227,31 @@ CREATE TABLE IF NOT EXISTS operations_cycles (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (product_id, as_of_date)
 );
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id TEXT PRIMARY KEY,
+    as_of_date TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed')),
+    price_rows_written INTEGER NOT NULL DEFAULT 0,
+    successful_steps INTEGER NOT NULL DEFAULT 0,
+    failed_steps INTEGER NOT NULL DEFAULT 0,
+    error_summary TEXT,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_steps (
+    step_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    step_name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'failed', 'blocked')),
+    attempts INTEGER NOT NULL CHECK (attempts > 0),
+    rows_written INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (run_id, step_name)
+);
 """
 
 
