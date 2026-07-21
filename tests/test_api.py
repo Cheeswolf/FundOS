@@ -49,6 +49,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/products/missing").status_code, 404)
         self.assertEqual(self.client.get("/workflows/missing").status_code, 404)
         self.assertEqual(self.client.get("/products/missing/operations").json(), [])
+        self.assertEqual(self.client.get("/pipeline-runs").json(), [])
+        self.assertEqual(self.client.get("/alerts").json(), [])
 
     def test_write_endpoints_require_api_key(self) -> None:
         response = self.client.post("/assets", json=[

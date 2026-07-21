@@ -10,7 +10,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from fundos.data_providers import AlphaVantageDailyProvider  # noqa: E402
 from fundos.domain import Asset  # noqa: E402
-from fundos.services import run_production_pipeline  # noqa: E402
+from fundos.services import deliver_pending_alerts, run_production_pipeline  # noqa: E402
 from fundos.storage import Database  # noqa: E402
 
 
@@ -51,10 +51,13 @@ def main() -> None:
     )
     for error in result.errors:
         print(f"ERROR: {error}")
+    webhook_url = os.environ.get("FUNDOS_ALERT_WEBHOOK_URL", "")
+    if webhook_url and result.status != "succeeded":
+        delivery = deliver_pending_alerts(database, webhook_url=webhook_url)
+        print(f"Alerts delivered: {delivery.delivered}; failed: {delivery.failed}")
     if result.status != "succeeded":
         raise SystemExit(1)
 
 
 if __name__ == "__main__":
     main()
-

@@ -252,6 +252,21 @@ CREATE TABLE IF NOT EXISTS pipeline_steps (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (run_id, step_name)
 );
+
+CREATE TABLE IF NOT EXISTS alert_events (
+    alert_id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('warning', 'critical')),
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+    delivery_attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    delivered_at TEXT,
+    UNIQUE (source_type, source_id)
+);
 """
 
 

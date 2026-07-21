@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fundos.data_providers import AlphaVantageError, PriceRow
 from fundos.services.operations import run_operations_cycle
+from fundos.services.alerts import create_alert
 from fundos.storage import Database
 
 
@@ -138,8 +139,16 @@ def run_production_pipeline(
                 " | ".join(errors) if errors else None, run_id,
             ),
         )
+    if status != "succeeded":
+        create_alert(
+            database,
+            source_type="pipeline_run",
+            source_id=run_id,
+            severity="critical" if status == "failed" else "warning",
+            title=f"FundOS 生产管道{status}",
+            message=" | ".join(errors) if errors else "生产管道存在失败步骤",
+        )
     return PipelineResult(
         run_id, status, price_rows_written, successful_steps,
         failed_steps, tuple(errors),
     )
-

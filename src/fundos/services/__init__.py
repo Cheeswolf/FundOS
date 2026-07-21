@@ -1,6 +1,7 @@
 """Application services."""
 
 from .nav_service import calculate_and_store_nav
+from .alerts import AlertDeliveryResult, create_alert, deliver_pending_alerts
 from .operations import OperationsCycleResult, run_operations_cycle
 from .pipeline import PipelineResult, run_production_pipeline
 from .publication import PublicationResult, publish_portfolio_version
@@ -20,6 +21,9 @@ __all__ = [
     "PerformanceResult",
     "PublicationResult",
     "calculate_and_store_nav",
+    "AlertDeliveryResult",
+    "create_alert",
+    "deliver_pending_alerts",
     "OperationsCycleResult",
     "run_operations_cycle",
     "PipelineResult",

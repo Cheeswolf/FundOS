@@ -93,8 +93,10 @@ class ProductionPipelineTests(unittest.TestCase):
         run = self.database.fetch_all("SELECT * FROM pipeline_runs WHERE run_id = ?", (result.run_id,))[0]
         self.assertEqual(run["status"], "partial")
         self.assertIn("permanent provider failure", run["error_summary"])
+        alerts = self.database.fetch_all("SELECT * FROM alert_events WHERE source_id = ?", (result.run_id,))
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["severity"], "warning")
 
 
 if __name__ == "__main__":
     unittest.main()
-

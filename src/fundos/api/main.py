@@ -327,6 +327,38 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             (product_id, limit),
         ))
 
+    @app.get("/pipeline-runs", tags=["operations"])
+    def list_pipeline_runs(
+        limit: int = Query(default=20, ge=1, le=200),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        runs = _rows(db.fetch_all(
+            "SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+        ))
+        for run in runs:
+            run["steps"] = _rows(db.fetch_all(
+                "SELECT * FROM pipeline_steps WHERE run_id = ? ORDER BY step_id",
+                (run["run_id"],),
+            ))
+        return runs
+
+    @app.get("/alerts", tags=["operations"])
+    def list_alerts(
+        status: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        if status is not None and status not in {"pending", "delivered", "failed"}:
+            raise HTTPException(status_code=422, detail="invalid alert status")
+        if status:
+            return _rows(db.fetch_all(
+                "SELECT * FROM alert_events WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                (status, limit),
+            ))
+        return _rows(db.fetch_all(
+            "SELECT * FROM alert_events ORDER BY created_at DESC LIMIT ?", (limit,)
+        ))
+
     @app.get("/products/{product_id}/research", tags=["research"])
     def list_research(product_id: str, db: Database = Depends(get_database)) -> list[dict[str, Any]]:
         reports = _rows(db.fetch_all(
