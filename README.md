@@ -121,3 +121,14 @@ GitHub Actions 会在 `main` 分支推送及 Pull Request 上自动执行完整�
 - [API 使用示例](docs/API_EXAMPLES.md)
 - [生产部署检查清单](docs/DEPLOYMENT_CHECKLIST.md)
 - [项目整体审计](docs/PROJECT_AUDIT.md)
+
+## AI 研究草稿
+
+系统支持通过兼容 Chat Completions 协议的模型服务生成结构化研究草稿。模型仅能使用输入文件中的可信证据，输出还会经过资产覆盖、证据引用、观点方向和置信度校验；生成结果保持 `draft` 状态，仍需人工确认和既有审批流程。
+
+```powershell
+$env:FUNDOS_LLM_API_KEY = "your-key"
+$env:FUNDOS_LLM_MODEL = "your-model"
+$env:FUNDOS_LLM_BASE_URL = "https://your-provider.example/v1"
+python scripts/generate_research.py path\to\research-input.json
+```
