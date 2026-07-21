@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,3 +76,60 @@ class InvestmentMandate:
                 raise ValueError(f"{name} must be between 0 and 1")
         if self.maximum_data_age_days < 0:
             raise ValueError("maximum data age days cannot be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchEvidence:
+    evidence_id: str
+    title: str
+    source: str
+    url: str
+    published_at: datetime
+
+    def __post_init__(self) -> None:
+        if not self.title.strip() or not self.source.strip() or not self.url.strip():
+            raise ValueError("evidence title, source and URL are required")
+
+
+@dataclass(frozen=True, slots=True)
+class AssetView:
+    asset_symbol: str
+    direction: Literal["negative", "neutral", "positive"]
+    confidence: Decimal
+    thesis: str
+    evidence_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not Decimal("0") <= self.confidence <= Decimal("1"):
+            raise ValueError("asset view confidence must be between 0 and 1")
+        if not self.thesis.strip():
+            raise ValueError("asset view thesis cannot be empty")
+        if not self.evidence_ids:
+            raise ValueError("asset view must cite at least one evidence item")
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchReport:
+    report_id: str
+    product_id: str
+    as_of_date: date
+    market_regime: str
+    summary: str
+    confidence: Decimal
+    evidence: tuple[ResearchEvidence, ...]
+    asset_views: tuple[AssetView, ...]
+
+    def __post_init__(self) -> None:
+        if not self.market_regime.strip() or not self.summary.strip():
+            raise ValueError("market regime and research summary are required")
+        if not Decimal("0") <= self.confidence <= Decimal("1"):
+            raise ValueError("research confidence must be between 0 and 1")
+        evidence_ids = {item.evidence_id for item in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError("research evidence IDs must be unique")
+        if not self.asset_views:
+            raise ValueError("research report must contain asset views")
+        for view in self.asset_views:
+            unknown = set(view.evidence_ids) - evidence_ids
+            if unknown:
+                raise ValueError(f"asset view cites unknown evidence: {', '.join(sorted(unknown))}")

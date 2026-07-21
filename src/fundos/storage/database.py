@@ -106,9 +106,47 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS research_reports (
+    report_id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    as_of_date TEXT NOT NULL,
+    market_regime TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'final')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finalized_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS research_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    report_id TEXT NOT NULL REFERENCES research_reports(report_id),
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    url TEXT NOT NULL,
+    published_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS asset_views (
+    view_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id TEXT NOT NULL REFERENCES research_reports(report_id),
+    asset_symbol TEXT NOT NULL REFERENCES assets(symbol),
+    direction TEXT NOT NULL CHECK (direction IN ('negative', 'neutral', 'positive')),
+    confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+    thesis TEXT NOT NULL,
+    UNIQUE (report_id, asset_symbol)
+);
+
+CREATE TABLE IF NOT EXISTS asset_view_evidence (
+    view_id INTEGER NOT NULL REFERENCES asset_views(view_id),
+    evidence_id TEXT NOT NULL REFERENCES research_evidence(evidence_id),
+    PRIMARY KEY (view_id, evidence_id)
+);
+
 CREATE TABLE IF NOT EXISTS portfolio_proposals (
     proposal_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL UNIQUE REFERENCES workflow_runs(run_id),
+    research_report_id TEXT REFERENCES research_reports(report_id),
     rationale TEXT NOT NULL,
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -168,6 +206,9 @@ class Database:
                 connection.execute("ALTER TABLE investment_mandates ADD COLUMN maximum_data_age_days INTEGER NOT NULL DEFAULT 3")
             if "maximum_stress_loss" not in mandate_columns:
                 connection.execute("ALTER TABLE investment_mandates ADD COLUMN maximum_stress_loss REAL NOT NULL DEFAULT 0.20")
+            proposal_columns = {row[1] for row in connection.execute("PRAGMA table_info(portfolio_proposals)")}
+            if "research_report_id" not in proposal_columns:
+                connection.execute("ALTER TABLE portfolio_proposals ADD COLUMN research_report_id TEXT")
 
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]

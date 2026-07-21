@@ -35,6 +35,7 @@ def create_proposal(
     version: PortfolioVersion,
     rationale: str,
     created_by: str,
+    research_report_id: str,
     run_id: str | None = None,
 ) -> str:
     if not rationale.strip() or not created_by.strip():
@@ -47,6 +48,14 @@ def create_proposal(
         ).fetchone()
         if product is None:
             raise ValueError("portfolio product does not exist")
+        research = connection.execute(
+            "SELECT product_id, status FROM research_reports WHERE report_id = ?",
+            (research_report_id,),
+        ).fetchone()
+        if research is None or research["product_id"] != version.product_id:
+            raise ValueError("proposal must reference research for the same product")
+        if research["status"] != "final":
+            raise ValueError("proposal requires a finalized research report")
         connection.execute(
             """
             INSERT INTO portfolio_versions
@@ -64,8 +73,12 @@ def create_proposal(
             (run_id, version.product_id, version.version_id),
         )
         connection.execute(
-            "INSERT INTO portfolio_proposals (proposal_id, run_id, rationale, created_by) VALUES (?, ?, ?, ?)",
-            (proposal_id, run_id, rationale.strip(), created_by.strip()),
+            """
+            INSERT INTO portfolio_proposals
+                (proposal_id, run_id, research_report_id, rationale, created_by)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (proposal_id, run_id, research_report_id, rationale.strip(), created_by.strip()),
         )
     return run_id
 

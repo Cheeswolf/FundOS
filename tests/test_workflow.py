@@ -1,15 +1,20 @@
 import sys
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from fundos.domain import Asset, InvestmentMandate, PortfolioProduct, PortfolioVersion, PositionWeight  # noqa: E402
+from fundos.domain import (  # noqa: E402
+    Asset, AssetView, InvestmentMandate, PortfolioProduct, PortfolioVersion,
+    PositionWeight, ResearchEvidence, ResearchReport,
+)
 from fundos.services import (  # noqa: E402
     create_proposal,
+    create_research_report,
+    finalize_research_report,
     publish_approved_workflow,
     record_committee_decision,
     run_risk_review,
@@ -36,6 +41,13 @@ class WorkflowTests(unittest.TestCase):
             ("fixture", "BOND", date(2026, 7, 1), 100.0),
             ("fixture", "CASH", date(2026, 7, 1), 1.0),
         ])
+        report = ResearchReport(
+            "R1", "P1", date(2026, 7, 1), "balanced", "Markets are stable.", Decimal("0.80"),
+            (ResearchEvidence("E1", "Market note", "fixture", "https://example.test/e1", datetime(2026, 7, 1, tzinfo=timezone.utc)),),
+            (AssetView("EQUITY", "neutral", Decimal("0.70"), "Valuation is balanced.", ("E1",)),),
+        )
+        create_research_report(self.database, report)
+        finalize_research_report(self.database, report_id="R1")
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -71,6 +83,7 @@ class WorkflowTests(unittest.TestCase):
             version=self.version(),
             rationale="Initial balanced allocation",
             created_by="portfolio-manager",
+            research_report_id="R1",
         )
         self.assertEqual(self.state(run_id), "proposed")
         report = self.review(run_id)
@@ -96,6 +109,7 @@ class WorkflowTests(unittest.TestCase):
             version=self.version("0.70", "0.25", "0.05"),
             rationale="Concentrated proposal",
             created_by="portfolio-manager",
+            research_report_id="R1",
         )
         report = self.review(run_id)
         failed_codes = {check.rule_code for check in report if not check.passed}
@@ -116,6 +130,7 @@ class WorkflowTests(unittest.TestCase):
             version=self.version(),
             rationale="Initial proposal",
             created_by="portfolio-manager",
+            research_report_id="R1",
         )
         with self.assertRaisesRegex(ValueError, "committee approval"):
             publish_approved_workflow(self.database, run_id=run_id)
@@ -126,6 +141,7 @@ class WorkflowTests(unittest.TestCase):
             version=self.version(),
             rationale="Proposal with stale inputs",
             created_by="portfolio-manager",
+            research_report_id="R1",
         )
         report = self.review(run_id, as_of_date=date(2026, 7, 10))
         failed = {check.rule_code for check in report if not check.passed}
@@ -139,6 +155,7 @@ class WorkflowTests(unittest.TestCase):
             version=self.version(),
             rationale="Proposal under stress",
             created_by="portfolio-manager",
+            research_report_id="R1",
         )
         report = self.review(run_id, equity_shock=-0.60)
         failed = {check.rule_code for check in report if not check.passed}

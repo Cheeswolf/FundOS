@@ -2,6 +2,7 @@
 
 from .nav_service import calculate_and_store_nav
 from .publication import PublicationResult, publish_portfolio_version
+from .research import create_research_report, finalize_research_report
 from .versioned_performance import PerformanceResult, calculate_and_store_versioned_performance
 from .workflow import (
     RiskCheck,
@@ -18,6 +19,8 @@ __all__ = [
     "calculate_and_store_nav",
     "calculate_and_store_versioned_performance",
     "publish_portfolio_version",
+    "create_research_report",
+    "finalize_research_report",
     "RiskCheck",
     "RiskReviewReport",
     "create_proposal",
