@@ -203,6 +203,14 @@ CREATE TABLE IF NOT EXISTS research_view_outcomes (
     was_correct INTEGER NOT NULL CHECK (was_correct IN (0, 1)),
     PRIMARY KEY (review_id, asset_symbol)
 );
+
+CREATE TABLE IF NOT EXISTS idempotency_records (
+    idempotency_key TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -320,6 +328,36 @@ class Database:
                 VALUES (?, ?, ?, ?)
                 """,
                 (product.product_id, product.name, product.benchmark_symbol, product.created_at.isoformat()),
+            )
+
+    def create_product_with_mandate(
+        self,
+        product: PortfolioProduct,
+        mandate: InvestmentMandate,
+    ) -> None:
+        if product.product_id != mandate.product_id:
+            raise ValueError("product and investment mandate IDs must match")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO portfolio_products (product_id, name, benchmark_symbol, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (product.product_id, product.name, product.benchmark_symbol, product.created_at.isoformat()),
+            )
+            connection.execute(
+                """
+                INSERT INTO investment_mandates (
+                    product_id, objective, risk_level, max_single_asset_weight,
+                    min_cash_weight, max_turnover, maximum_data_age_days, maximum_stress_loss
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    mandate.product_id, mandate.objective, mandate.risk_level,
+                    float(mandate.max_single_asset_weight), float(mandate.min_cash_weight),
+                    float(mandate.max_turnover), mandate.maximum_data_age_days,
+                    float(mandate.maximum_stress_loss),
+                ),
             )
 
     def upsert_investment_mandate(self, mandate: InvestmentMandate) -> None:

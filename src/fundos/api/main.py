@@ -2,11 +2,13 @@ import os
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime
+from hashlib import sha256
+import json
 from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 
 from fundos.api.schemas import (
     AssetInput,
@@ -52,7 +54,43 @@ def _domain_error(error: Exception) -> HTTPException:
     return HTTPException(status_code=422, detail=str(error))
 
 
-def create_app(database_path: str | Path | None = None) -> FastAPI:
+def _idempotent(
+    database: Database,
+    *,
+    key: str | None,
+    operation: str,
+    payload: Any,
+    action,
+) -> dict[str, Any]:
+    if not key:
+        return action()
+    request_hash = sha256(
+        json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    existing = database.fetch_all(
+        "SELECT * FROM idempotency_records WHERE idempotency_key = ?", (key,)
+    )
+    if existing:
+        if existing[0]["operation"] != operation or existing[0]["request_hash"] != request_hash:
+            raise HTTPException(status_code=409, detail="idempotency key was already used for another request")
+        return json.loads(existing[0]["response_json"])
+    result = action()
+    try:
+        with database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO idempotency_records
+                    (idempotency_key, operation, request_hash, response_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (key, operation, request_hash, json.dumps(result, ensure_ascii=False)),
+            )
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=409, detail="concurrent idempotent request conflict") from error
+    return result
+
+
+def create_app(database_path: str | Path | None = None, *, api_key: str | None = None) -> FastAPI:
     resolved_path = Path(database_path or os.environ.get("FUNDOS_DB_PATH", "data/fundos.sqlite3"))
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
     database = Database(resolved_path)
@@ -64,6 +102,15 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
         description="Investment research and portfolio operating system API",
     )
     app.state.database = database
+    app.state.api_key = api_key if api_key is not None else os.environ.get("FUNDOS_API_KEY")
+
+    def require_write_access(
+        request: Request,
+        supplied_key: str | None = Header(default=None, alias="X-API-Key"),
+    ) -> None:
+        expected_key = request.app.state.api_key
+        if expected_key and supplied_key != expected_key:
+            raise HTTPException(status_code=401, detail="invalid or missing API key")
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
@@ -73,7 +120,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     def list_products(db: Database = Depends(get_database)) -> list[dict[str, Any]]:
         return _rows(db.fetch_all("SELECT * FROM portfolio_products ORDER BY created_at"))
 
-    @app.post("/assets", status_code=201, tags=["setup"])
+    @app.post("/assets", status_code=201, tags=["setup"], dependencies=[Depends(require_write_access)])
     def upsert_assets(payload: list[AssetInput], db: Database = Depends(get_database)) -> dict[str, int]:
         if not payload:
             raise HTTPException(status_code=422, detail="at least one asset is required")
@@ -83,25 +130,34 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise _domain_error(error) from error
         return {"upserted": len(payload)}
 
-    @app.post("/products", status_code=201, tags=["portfolios"])
-    def create_product(payload: ProductCreate, db: Database = Depends(get_database)) -> dict[str, str]:
+    @app.post("/products", status_code=201, tags=["portfolios"], dependencies=[Depends(require_write_access)])
+    def create_product(
+        payload: ProductCreate,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        db: Database = Depends(get_database),
+    ) -> dict[str, str]:
         try:
-            db.create_product(
-                PortfolioProduct(payload.product_id, payload.name, payload.benchmark_symbol, datetime.now())
-            )
-            db.upsert_investment_mandate(
-                InvestmentMandate(
+            product = PortfolioProduct(payload.product_id, payload.name, payload.benchmark_symbol, datetime.now())
+            mandate = InvestmentMandate(
                     payload.product_id, payload.objective, payload.risk_level,
                     payload.max_single_asset_weight, payload.min_cash_weight,
                     payload.max_turnover, payload.maximum_data_age_days,
                     payload.maximum_stress_loss,
-                )
+            )
+            return _idempotent(
+                db,
+                key=idempotency_key,
+                operation="create_product",
+                payload=payload.dict(),
+                action=lambda: (
+                    db.create_product_with_mandate(product, mandate)
+                    or {"product_id": payload.product_id}
+                ),
             )
         except (ValueError, sqlite3.IntegrityError) as error:
             raise _domain_error(error) from error
-        return {"product_id": payload.product_id}
 
-    @app.post("/market-prices", status_code=201, tags=["market-data"])
+    @app.post("/market-prices", status_code=201, tags=["market-data"], dependencies=[Depends(require_write_access)])
     def import_market_prices(payload: PriceBatchInput, db: Database = Depends(get_database)) -> dict[str, int]:
         try:
             count = db.upsert_prices(
@@ -111,7 +167,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise _domain_error(error) from error
         return {"upserted": count}
 
-    @app.post("/research", status_code=201, tags=["research"])
+    @app.post("/research", status_code=201, tags=["research"], dependencies=[Depends(require_write_access)])
     def create_research(payload: ResearchCreate, db: Database = Depends(get_database)) -> dict[str, str]:
         try:
             report = ResearchReport(
@@ -138,7 +194,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise _domain_error(error) from error
         return {"report_id": payload.report_id, "status": "final" if payload.finalize else "draft"}
 
-    @app.post("/proposals", status_code=201, tags=["workflow"])
+    @app.post("/proposals", status_code=201, tags=["workflow"], dependencies=[Depends(require_write_access)])
     def create_portfolio_proposal(payload: ProposalCreate, db: Database = Depends(get_database)) -> dict[str, str]:
         try:
             run_id = create_proposal(
@@ -157,7 +213,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise _domain_error(error) from error
         return {"run_id": run_id, "state": "proposed"}
 
-    @app.post("/workflows/{run_id}/risk-review", tags=["workflow"])
+    @app.post("/workflows/{run_id}/risk-review", tags=["workflow"], dependencies=[Depends(require_write_access)])
     def review_workflow_risk(
         run_id: str, payload: RiskReviewInput, db: Database = Depends(get_database)
     ) -> dict[str, Any]:
@@ -175,7 +231,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             "checks": [asdict(item) for item in report.checks],
         }
 
-    @app.post("/workflows/{run_id}/committee-decision", tags=["workflow"])
+    @app.post("/workflows/{run_id}/committee-decision", tags=["workflow"], dependencies=[Depends(require_write_access)])
     def decide_workflow(
         run_id: str, payload: CommitteeDecisionInput, db: Database = Depends(get_database)
     ) -> dict[str, str]:
@@ -188,19 +244,32 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise _domain_error(error) from error
         return {"run_id": run_id, "decision": decision}
 
-    @app.post("/workflows/{run_id}/publish", tags=["workflow"])
-    def publish_workflow(run_id: str, db: Database = Depends(get_database)) -> dict[str, Any]:
-        try:
+    @app.post("/workflows/{run_id}/publish", tags=["workflow"], dependencies=[Depends(require_write_access)])
+    def publish_workflow(
+        run_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        db: Database = Depends(get_database),
+    ) -> dict[str, Any]:
+        def action() -> dict[str, Any]:
             result = publish_approved_workflow(db, run_id=run_id)
+            return {
+                "run_id": run_id,
+                "version_id": result.version_id,
+                "previous_version_id": result.previous_version_id,
+                "turnover": result.turnover,
+                "status": result.status,
+            }
+
+        try:
+            return _idempotent(
+                db,
+                key=idempotency_key,
+                operation=f"publish_workflow:{run_id}",
+                payload={"run_id": run_id},
+                action=action,
+            )
         except (ValueError, sqlite3.IntegrityError) as error:
             raise _domain_error(error) from error
-        return {
-            "run_id": run_id,
-            "version_id": result.version_id,
-            "previous_version_id": result.previous_version_id,
-            "turnover": result.turnover,
-            "status": result.status,
-        }
 
     @app.get("/products/{product_id}", tags=["portfolios"])
     def get_product(product_id: str, db: Database = Depends(get_database)) -> dict[str, Any]:

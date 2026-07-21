@@ -15,8 +15,9 @@ from fundos.domain import PortfolioProduct  # noqa: E402
 class ApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
-        self.app = create_app(Path(self.temporary_directory.name) / "api.sqlite3")
+        self.app = create_app(Path(self.temporary_directory.name) / "api.sqlite3", api_key="test-secret")
         self.client = TestClient(self.app)
+        self.write_headers = {"X-API-Key": "test-secret"}
 
     def tearDown(self) -> None:
         self.client.close()
@@ -42,13 +43,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/products/missing").status_code, 404)
         self.assertEqual(self.client.get("/workflows/missing").status_code, 404)
 
+    def test_write_endpoints_require_api_key(self) -> None:
+        response = self.client.post("/assets", json=[
+            {"symbol": "A", "name": "Asset", "asset_class": "equity"}
+        ])
+        self.assertEqual(response.status_code, 401)
+
     def test_complete_write_workflow(self) -> None:
-        assets = self.client.post("/assets", json=[
+        assets = self.client.post("/assets", headers=self.write_headers, json=[
             {"symbol": "EQUITY", "name": "Equity", "asset_class": "equity"},
             {"symbol": "CASH", "name": "Cash", "asset_class": "cash"},
         ])
         self.assertEqual(assets.status_code, 201)
-        product = self.client.post("/products", json={
+        product_headers = {**self.write_headers, "Idempotency-Key": "create-product-P1"}
+        product_payload = {
             "product_id": "P1",
             "name": "API Portfolio",
             "benchmark_symbol": "BM",
@@ -59,9 +67,13 @@ class ApiTests(unittest.TestCase):
             "max_turnover": 0.5,
             "maximum_data_age_days": 3,
             "maximum_stress_loss": 0.3,
-        })
+        }
+        product = self.client.post("/products", headers=product_headers, json=product_payload)
         self.assertEqual(product.status_code, 201)
-        prices = self.client.post("/market-prices", json={
+        repeated_product = self.client.post("/products", headers=product_headers, json=product_payload)
+        self.assertEqual(repeated_product.status_code, 201)
+        self.assertEqual(len(self.client.get("/products").json()), 1)
+        prices = self.client.post("/market-prices", headers=self.write_headers, json={
             "provider": "fixture",
             "prices": [
                 {"symbol": "EQUITY", "trade_date": "2026-07-01", "close": 100},
@@ -69,7 +81,7 @@ class ApiTests(unittest.TestCase):
             ],
         })
         self.assertEqual(prices.status_code, 201)
-        research = self.client.post("/research", json={
+        research = self.client.post("/research", headers=self.write_headers, json={
             "report_id": "R1",
             "product_id": "P1",
             "as_of_date": "2026-07-01",
@@ -93,7 +105,7 @@ class ApiTests(unittest.TestCase):
             "finalize": True,
         })
         self.assertEqual(research.status_code, 201)
-        proposal = self.client.post("/proposals", json={
+        proposal = self.client.post("/proposals", headers=self.write_headers, json={
             "version_id": "V1",
             "product_id": "P1",
             "version_number": 1,
@@ -108,7 +120,7 @@ class ApiTests(unittest.TestCase):
             "run_id": "RUN1",
         })
         self.assertEqual(proposal.status_code, 201)
-        risk = self.client.post("/workflows/RUN1/risk-review", json={
+        risk = self.client.post("/workflows/RUN1/risk-review", headers=self.write_headers, json={
             "provider": "fixture",
             "as_of_date": "2026-07-01",
             "stress_scenarios": {
@@ -117,15 +129,19 @@ class ApiTests(unittest.TestCase):
         })
         self.assertEqual(risk.status_code, 200)
         self.assertTrue(risk.json()["passed"])
-        decision = self.client.post("/workflows/RUN1/committee-decision", json={
+        decision = self.client.post("/workflows/RUN1/committee-decision", headers=self.write_headers, json={
             "approved": True,
             "rationale": "All constraints passed.",
             "decided_by": "investment-committee",
         })
         self.assertEqual(decision.status_code, 200)
-        published = self.client.post("/workflows/RUN1/publish")
+        publish_headers = {**self.write_headers, "Idempotency-Key": "publish-RUN1"}
+        published = self.client.post("/workflows/RUN1/publish", headers=publish_headers)
         self.assertEqual(published.status_code, 200)
         self.assertEqual(published.json()["status"], "published")
+        repeated_publish = self.client.post("/workflows/RUN1/publish", headers=publish_headers)
+        self.assertEqual(repeated_publish.status_code, 200)
+        self.assertEqual(repeated_publish.json(), published.json())
         workflow = self.client.get("/workflows/RUN1").json()
         self.assertEqual(workflow["run"]["state"], "published")
 
