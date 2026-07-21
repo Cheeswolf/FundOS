@@ -1,10 +1,40 @@
 import os
+import sqlite3
+from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
+from fundos.api.schemas import (
+    AssetInput,
+    CommitteeDecisionInput,
+    PriceBatchInput,
+    ProductCreate,
+    ProposalCreate,
+    ResearchCreate,
+    RiskReviewInput,
+)
+from fundos.domain import (
+    Asset,
+    AssetView,
+    InvestmentMandate,
+    PortfolioProduct,
+    PortfolioVersion,
+    PositionWeight,
+    ResearchEvidence,
+    ResearchReport,
+)
+from fundos.services import (
+    create_proposal,
+    create_research_report,
+    finalize_research_report,
+    publish_approved_workflow,
+    record_committee_decision,
+    run_risk_review,
+)
 from fundos.storage import Database
 
 
@@ -14,6 +44,12 @@ def _rows(rows: list[Any]) -> list[dict[str, Any]]:
 
 def get_database(request: Request) -> Database:
     return request.app.state.database
+
+
+def _domain_error(error: Exception) -> HTTPException:
+    if isinstance(error, sqlite3.IntegrityError):
+        return HTTPException(status_code=409, detail=str(error))
+    return HTTPException(status_code=422, detail=str(error))
 
 
 def create_app(database_path: str | Path | None = None) -> FastAPI:
@@ -36,6 +72,135 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     @app.get("/products", tags=["portfolios"])
     def list_products(db: Database = Depends(get_database)) -> list[dict[str, Any]]:
         return _rows(db.fetch_all("SELECT * FROM portfolio_products ORDER BY created_at"))
+
+    @app.post("/assets", status_code=201, tags=["setup"])
+    def upsert_assets(payload: list[AssetInput], db: Database = Depends(get_database)) -> dict[str, int]:
+        if not payload:
+            raise HTTPException(status_code=422, detail="at least one asset is required")
+        try:
+            db.upsert_assets(Asset(item.symbol, item.name, item.asset_class) for item in payload)
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"upserted": len(payload)}
+
+    @app.post("/products", status_code=201, tags=["portfolios"])
+    def create_product(payload: ProductCreate, db: Database = Depends(get_database)) -> dict[str, str]:
+        try:
+            db.create_product(
+                PortfolioProduct(payload.product_id, payload.name, payload.benchmark_symbol, datetime.now())
+            )
+            db.upsert_investment_mandate(
+                InvestmentMandate(
+                    payload.product_id, payload.objective, payload.risk_level,
+                    payload.max_single_asset_weight, payload.min_cash_weight,
+                    payload.max_turnover, payload.maximum_data_age_days,
+                    payload.maximum_stress_loss,
+                )
+            )
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"product_id": payload.product_id}
+
+    @app.post("/market-prices", status_code=201, tags=["market-data"])
+    def import_market_prices(payload: PriceBatchInput, db: Database = Depends(get_database)) -> dict[str, int]:
+        try:
+            count = db.upsert_prices(
+                (payload.provider, item.symbol, item.trade_date, item.close) for item in payload.prices
+            )
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"upserted": count}
+
+    @app.post("/research", status_code=201, tags=["research"])
+    def create_research(payload: ResearchCreate, db: Database = Depends(get_database)) -> dict[str, str]:
+        try:
+            report = ResearchReport(
+                payload.report_id, payload.product_id, payload.as_of_date,
+                payload.market_regime, payload.summary, payload.confidence,
+                tuple(
+                    ResearchEvidence(
+                        item.evidence_id, item.title, item.source, item.url, item.published_at
+                    )
+                    for item in payload.evidence
+                ),
+                tuple(
+                    AssetView(
+                        item.asset_symbol, item.direction, item.confidence,
+                        item.thesis, tuple(item.evidence_ids),
+                    )
+                    for item in payload.asset_views
+                ),
+            )
+            create_research_report(db, report)
+            if payload.finalize:
+                finalize_research_report(db, report_id=payload.report_id)
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"report_id": payload.report_id, "status": "final" if payload.finalize else "draft"}
+
+    @app.post("/proposals", status_code=201, tags=["workflow"])
+    def create_portfolio_proposal(payload: ProposalCreate, db: Database = Depends(get_database)) -> dict[str, str]:
+        try:
+            run_id = create_proposal(
+                db,
+                version=PortfolioVersion(
+                    payload.version_id, payload.product_id, payload.version_number,
+                    payload.effective_date,
+                    tuple(PositionWeight(item.asset_symbol, item.weight) for item in payload.weights),
+                ),
+                rationale=payload.rationale,
+                created_by=payload.created_by,
+                research_report_id=payload.research_report_id,
+                run_id=payload.run_id,
+            )
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"run_id": run_id, "state": "proposed"}
+
+    @app.post("/workflows/{run_id}/risk-review", tags=["workflow"])
+    def review_workflow_risk(
+        run_id: str, payload: RiskReviewInput, db: Database = Depends(get_database)
+    ) -> dict[str, Any]:
+        try:
+            report = run_risk_review(
+                db, run_id=run_id, provider=payload.provider,
+                as_of_date=payload.as_of_date, stress_scenarios=payload.stress_scenarios,
+            )
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {
+            "run_id": report.run_id,
+            "passed": report.passed,
+            "hard_failure_count": report.hard_failure_count,
+            "checks": [asdict(item) for item in report.checks],
+        }
+
+    @app.post("/workflows/{run_id}/committee-decision", tags=["workflow"])
+    def decide_workflow(
+        run_id: str, payload: CommitteeDecisionInput, db: Database = Depends(get_database)
+    ) -> dict[str, str]:
+        try:
+            decision = record_committee_decision(
+                db, run_id=run_id, approved=payload.approved,
+                rationale=payload.rationale, decided_by=payload.decided_by,
+            )
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"run_id": run_id, "decision": decision}
+
+    @app.post("/workflows/{run_id}/publish", tags=["workflow"])
+    def publish_workflow(run_id: str, db: Database = Depends(get_database)) -> dict[str, Any]:
+        try:
+            result = publish_approved_workflow(db, run_id=run_id)
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {
+            "run_id": run_id,
+            "version_id": result.version_id,
+            "previous_version_id": result.previous_version_id,
+            "turnover": result.turnover,
+            "status": result.status,
+        }
 
     @app.get("/products/{product_id}", tags=["portfolios"])
     def get_product(product_id: str, db: Database = Depends(get_database)) -> dict[str, Any]:
@@ -129,4 +294,3 @@ app = create_app()
 
 def run() -> None:
     uvicorn.run("fundos.api.main:app", host="127.0.0.1", port=8000, reload=False)
-
