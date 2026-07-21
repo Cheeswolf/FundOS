@@ -132,3 +132,7 @@ $env:FUNDOS_LLM_MODEL = "your-model"
 $env:FUNDOS_LLM_BASE_URL = "https://your-provider.example/v1"
 python scripts/generate_research.py path\to\research-input.json
 ```
+
+可通过 `FUNDOS_LLM_MAX_DAILY_COST_USD`、`FUNDOS_LLM_MAX_DAILY_TOKENS` 和
+`FUNDOS_LLM_CIRCUIT_FAILURE_THRESHOLD` 设置每日预算及连续失败熔断阈值；设为 `0`
+表示关闭对应限制。策略触发时不会调用模型，并会写入运营告警。

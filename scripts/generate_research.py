@@ -10,7 +10,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from fundos.agents import AuditedLanguageModel, OpenAICompatibleProvider, ResearchAgent  # noqa: E402
+from fundos.agents import (  # noqa: E402
+    AuditedLanguageModel,
+    GuardedLanguageModel,
+    OpenAICompatibleProvider,
+    ResearchAgent,
+)
 from fundos.domain import ResearchEvidence  # noqa: E402
 from fundos.services import create_research_report  # noqa: E402
 from fundos.storage import Database  # noqa: E402
@@ -50,7 +55,16 @@ def main() -> None:
         input_cost_per_million=float(os.environ.get("FUNDOS_LLM_INPUT_COST_PER_MILLION", "0")),
         output_cost_per_million=float(os.environ.get("FUNDOS_LLM_OUTPUT_COST_PER_MILLION", "0")),
     )
-    report = ResearchAgent(audited_provider).draft_report(
+    guarded_provider = GuardedLanguageModel(
+        model=audited_provider,
+        database=database,
+        provider_name=os.environ.get("FUNDOS_LLM_PROVIDER", "openai-compatible"),
+        model_name=os.environ.get("FUNDOS_LLM_MODEL", ""),
+        max_daily_cost_usd=float(os.environ.get("FUNDOS_LLM_MAX_DAILY_COST_USD", "0")),
+        max_daily_tokens=int(os.environ.get("FUNDOS_LLM_MAX_DAILY_TOKENS", "0")),
+        circuit_failure_threshold=int(os.environ.get("FUNDOS_LLM_CIRCUIT_FAILURE_THRESHOLD", "3")),
+    )
+    report = ResearchAgent(guarded_provider).draft_report(
         report_id=configuration["report_id"],
         product_id=configuration["product_id"],
         as_of_date=date.fromisoformat(configuration["as_of_date"]),
