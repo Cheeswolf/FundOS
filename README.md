@@ -114,3 +114,9 @@ docker compose up --build -d
 ## 持续集成
 
 GitHub Actions 会在 `main` 分支推送及 Pull Request 上自动执行完整测试、源码编译检查和 Docker 镜像构建。Dependabot 每周检查 Python、GitHub Actions 和 Docker 基础镜像更新。
+
+## 项目文档
+
+- [运行与运营手册](docs/OPERATIONS.md)
+- [API 使用示例](docs/API_EXAMPLES.md)
+- [生产部署检查清单](docs/DEPLOYMENT_CHECKLIST.md)
