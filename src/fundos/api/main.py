@@ -7,6 +7,7 @@ from hmac import compare_digest
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -133,6 +134,40 @@ def create_app(
         raise ValueError("API keys must be non-empty and roles must be operator or admin")
     app.state.api_keys = configured_keys
 
+    @app.middleware("http")
+    async def audit_mutating_requests(request: Request, call_next):
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return await call_next(request)
+        supplied_key = request.headers.get("X-API-Key")
+        request.state.actor_id = (
+            f"key:{sha256(supplied_key.encode('utf-8')).hexdigest()[:12]}"
+            if supplied_key else "anonymous"
+        )
+        request.state.actor_role = "unknown" if configured_keys else "development-admin"
+        request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            outcome = "succeeded" if status_code < 400 else "rejected" if status_code < 500 else "failed"
+            with database.connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO api_audit_events (
+                        audit_id, request_id, method, path, actor_id, actor_role,
+                        outcome, status_code, client_ip, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid4()), request_id, request.method, request.url.path,
+                        request.state.actor_id, request.state.actor_role, outcome, status_code,
+                        request.client.host if request.client else None,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
     def require_role(minimum_role: str):
         required_level = {"operator": 1, "admin": 2}[minimum_role]
 
@@ -149,6 +184,7 @@ def create_app(
             )
             if matched_role is None:
                 raise HTTPException(status_code=401, detail="invalid or missing API key")
+            request.state.actor_role = matched_role
             if {"operator": 1, "admin": 2}[matched_role] < required_level:
                 raise HTTPException(status_code=403, detail="insufficient API key role")
 
@@ -511,6 +547,23 @@ def create_app(
             ))
         return _rows(db.fetch_all(
             f"SELECT {columns} FROM model_calls ORDER BY created_at DESC LIMIT ?", (limit,)
+        ))
+
+    @app.get("/audit-events", tags=["security"], dependencies=[Depends(require_admin)])
+    def list_audit_events(
+        outcome: str | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=1000),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        if outcome is not None and outcome not in {"succeeded", "rejected", "failed"}:
+            raise HTTPException(status_code=422, detail="invalid audit outcome")
+        if outcome:
+            return _rows(db.fetch_all(
+                "SELECT * FROM api_audit_events WHERE outcome = ? ORDER BY created_at DESC LIMIT ?",
+                (outcome, limit),
+            ))
+        return _rows(db.fetch_all(
+            "SELECT * FROM api_audit_events ORDER BY created_at DESC LIMIT ?", (limit,)
         ))
 
     @app.get("/products/{product_id}/research", tags=["research"])

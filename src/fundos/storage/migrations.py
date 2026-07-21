@@ -85,11 +85,30 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_api_audit_log(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_audit_events (
+                audit_id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL,
+                method TEXT NOT NULL,
+                path TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                actor_role TEXT NOT NULL,
+                outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'rejected', 'failed')),
+                status_code INTEGER NOT NULL,
+                client_ip TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
         Migration(3, "add_model_call_audit", add_model_call_audit),
         Migration(4, "add_model_operations_control", add_model_operations_control),
+        Migration(5, "add_api_audit_log", add_api_audit_log),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

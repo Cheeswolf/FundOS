@@ -172,6 +172,45 @@ class ApiTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "roles"):
                 create_app(Path(directory) / "invalid.sqlite3", api_keys={"key": "viewer"})
 
+    def test_audits_successful_and_rejected_writes_without_exposing_keys(self) -> None:
+        successful = self.client.post(
+            "/assets", headers={**self.write_headers, "X-Request-ID": "request-success"},
+            json=[{"symbol": "AUDIT", "name": "Audit Asset", "asset_class": "cash"}],
+        )
+        self.assertEqual(successful.status_code, 201)
+        rejected = self.client.post(
+            "/assets", headers={"X-API-Key": "wrong-secret", "X-Request-ID": "request-rejected"},
+            json=[{"symbol": "NO", "name": "Rejected", "asset_class": "cash"}],
+        )
+        self.assertEqual(rejected.status_code, 401)
+
+        response = self.client.get("/audit-events", headers=self.write_headers)
+        self.assertEqual(response.status_code, 200)
+        events = {item["request_id"]: item for item in response.json()}
+        self.assertEqual(events["request-success"]["outcome"], "succeeded")
+        self.assertEqual(events["request-success"]["actor_role"], "admin")
+        self.assertEqual(events["request-rejected"]["outcome"], "rejected")
+        self.assertEqual(events["request-rejected"]["actor_role"], "unknown")
+        serialized = str(events)
+        self.assertNotIn("test-secret", serialized)
+        self.assertNotIn("wrong-secret", serialized)
+
+    def test_audit_log_requires_admin_role(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            role_app = create_app(
+                Path(directory) / "audit-roles.sqlite3",
+                api_keys={"operator-secret": "operator", "admin-secret": "admin"},
+            )
+            with TestClient(role_app) as client:
+                self.assertEqual(
+                    client.get("/audit-events", headers={"X-API-Key": "operator-secret"}).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    client.get("/audit-events", headers={"X-API-Key": "admin-secret"}).status_code,
+                    200,
+                )
+
     def test_complete_write_workflow(self) -> None:
         assets = self.client.post("/assets", headers=self.write_headers, json=[
             {"symbol": "EQUITY", "name": "Equity", "asset_class": "equity"},

@@ -301,6 +301,19 @@ CREATE TABLE IF NOT EXISTS alert_lifecycle (
     note TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS api_audit_events (
+    audit_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_role TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'rejected', 'failed')),
+    status_code INTEGER NOT NULL,
+    client_ip TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 

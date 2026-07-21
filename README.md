@@ -143,3 +143,5 @@ python scripts/generate_research.py path\to\research-input.json
 `FUNDOS_API_KEYS_JSON` 配置分级密钥，例如
 `{"operations-key":"operator","governance-key":"admin"}`。`operator` 可维护数据、研究、
 提案及风险审查；投委会决策、组合发布、告警处置和模型熔断重置仅允许 `admin`。
+所有修改型 API 请求都会写入审计日志；`GET /audit-events` 仅允许 `admin` 查询。
+日志保存密钥指纹、角色、路径、结果和请求 ID，不保存密钥或请求正文。
