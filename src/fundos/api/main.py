@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -357,6 +357,54 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             ))
         return _rows(db.fetch_all(
             "SELECT * FROM alert_events ORDER BY created_at DESC LIMIT ?", (limit,)
+        ))
+
+    @app.get("/model-calls/summary", tags=["ai-operations"])
+    def model_call_summary(
+        days: int = Query(default=30, ge=1, le=365),
+        db: Database = Depends(get_database),
+    ) -> dict[str, Any]:
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        row = db.fetch_all(
+            """
+            SELECT
+                COUNT(*) AS total_calls,
+                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_calls,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_calls,
+                COALESCE(SUM(attempts), 0) AS total_attempts,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd,
+                COALESCE(AVG(latency_ms), 0) AS average_latency_ms
+            FROM model_calls WHERE created_at >= ?
+            """,
+            (since,),
+        )[0]
+        result = dict(row)
+        total = result["total_calls"]
+        result["success_rate"] = result["succeeded_calls"] / total if total else None
+        result["period_days"] = days
+        return result
+
+    @app.get("/model-calls", tags=["ai-operations"])
+    def list_model_calls(
+        status: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        if status is not None and status not in {"succeeded", "failed"}:
+            raise HTTPException(status_code=422, detail="invalid model call status")
+        columns = """
+            call_id, purpose, provider, model, status, attempts, latency_ms,
+            input_tokens, output_tokens, estimated_cost_usd, error_message, created_at
+        """
+        if status:
+            return _rows(db.fetch_all(
+                f"SELECT {columns} FROM model_calls WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                (status, limit),
+            ))
+        return _rows(db.fetch_all(
+            f"SELECT {columns} FROM model_calls ORDER BY created_at DESC LIMIT ?", (limit,)
         ))
 
     @app.get("/products/{product_id}/research", tags=["research"])

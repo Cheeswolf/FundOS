@@ -51,6 +51,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/products/missing/operations").json(), [])
         self.assertEqual(self.client.get("/pipeline-runs").json(), [])
         self.assertEqual(self.client.get("/alerts").json(), [])
+        self.assertEqual(self.client.get("/model-calls").json(), [])
+        self.assertIsNone(self.client.get("/model-calls/summary").json()["success_rate"])
+
+    def test_reports_model_call_usage_and_hides_prompt_hash(self) -> None:
+        with self.app.state.database.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO model_calls (
+                    call_id, purpose, provider, model, status, attempts, latency_ms,
+                    input_tokens, output_tokens, estimated_cost_usd, prompt_sha256,
+                    error_message, created_at
+                ) VALUES (?, 'research_draft', 'fixture', 'model-a', ?, ?, ?, ?, ?, ?, 'hash', ?, ?)
+                """,
+                [
+                    ("C1", "succeeded", 1, 100, 20, 5, 0.00008, None, datetime.now().astimezone().isoformat()),
+                    ("C2", "failed", 3, 300, None, None, None, "timeout", datetime.now().astimezone().isoformat()),
+                ],
+            )
+
+        summary = self.client.get("/model-calls/summary?days=7").json()
+        self.assertEqual((summary["total_calls"], summary["total_attempts"]), (2, 4))
+        self.assertEqual(summary["success_rate"], 0.5)
+        self.assertEqual((summary["input_tokens"], summary["output_tokens"]), (20, 5))
+        calls = self.client.get("/model-calls?status=failed").json()
+        self.assertEqual(calls[0]["call_id"], "C2")
+        self.assertNotIn("prompt_sha256", calls[0])
+        self.assertEqual(self.client.get("/model-calls?status=unknown").status_code, 422)
 
     def test_write_endpoints_require_api_key(self) -> None:
         response = self.client.post("/assets", json=[
