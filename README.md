@@ -120,3 +120,4 @@ GitHub Actions 会在 `main` 分支推送及 Pull Request 上自动执行完整�
 - [运行与运营手册](docs/OPERATIONS.md)
 - [API 使用示例](docs/API_EXAMPLES.md)
 - [生产部署检查清单](docs/DEPLOYMENT_CHECKLIST.md)
+- [项目整体审计](docs/PROJECT_AUDIT.md)
