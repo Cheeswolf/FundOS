@@ -3,6 +3,7 @@ import sqlite3
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from hmac import compare_digest
 import json
 from pathlib import Path
 from typing import Any
@@ -96,7 +97,12 @@ def _idempotent(
     return result
 
 
-def create_app(database_path: str | Path | None = None, *, api_key: str | None = None) -> FastAPI:
+def create_app(
+    database_path: str | Path | None = None,
+    *,
+    api_key: str | None = None,
+    api_keys: dict[str, str] | None = None,
+) -> FastAPI:
     resolved_path = Path(database_path or os.environ.get("FUNDOS_DB_PATH", "data/fundos.sqlite3"))
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
     database = Database(resolved_path)
@@ -108,15 +114,48 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
         description="Investment research and portfolio operating system API",
     )
     app.state.database = database
-    app.state.api_key = api_key if api_key is not None else os.environ.get("FUNDOS_API_KEY")
+    configured_keys = dict(api_keys or {})
+    if api_keys is None:
+        serialized_keys = os.environ.get("FUNDOS_API_KEYS_JSON", "").strip()
+        if serialized_keys:
+            try:
+                parsed_keys = json.loads(serialized_keys)
+            except json.JSONDecodeError as error:
+                raise ValueError("FUNDOS_API_KEYS_JSON must be valid JSON") from error
+            if not isinstance(parsed_keys, dict):
+                raise ValueError("FUNDOS_API_KEYS_JSON must be a key-to-role object")
+            configured_keys.update({str(key): str(role) for key, role in parsed_keys.items()})
+    legacy_key = api_key if api_key is not None else os.environ.get("FUNDOS_API_KEY")
+    if legacy_key:
+        configured_keys[legacy_key] = "admin"
+    invalid_roles = set(configured_keys.values()) - {"operator", "admin"}
+    if invalid_roles or any(not key for key in configured_keys):
+        raise ValueError("API keys must be non-empty and roles must be operator or admin")
+    app.state.api_keys = configured_keys
 
-    def require_write_access(
-        request: Request,
-        supplied_key: str | None = Header(default=None, alias="X-API-Key"),
-    ) -> None:
-        expected_key = request.app.state.api_key
-        if expected_key and supplied_key != expected_key:
-            raise HTTPException(status_code=401, detail="invalid or missing API key")
+    def require_role(minimum_role: str):
+        required_level = {"operator": 1, "admin": 2}[minimum_role]
+
+        def dependency(
+            request: Request,
+            supplied_key: str | None = Header(default=None, alias="X-API-Key"),
+        ) -> None:
+            keys = request.app.state.api_keys
+            if not keys:
+                return
+            matched_role = next(
+                (role for key, role in keys.items() if supplied_key and compare_digest(supplied_key, key)),
+                None,
+            )
+            if matched_role is None:
+                raise HTTPException(status_code=401, detail="invalid or missing API key")
+            if {"operator": 1, "admin": 2}[matched_role] < required_level:
+                raise HTTPException(status_code=403, detail="insufficient API key role")
+
+        return dependency
+
+    require_operator = require_role("operator")
+    require_admin = require_role("admin")
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
@@ -130,7 +169,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
     def list_products(db: Database = Depends(get_database)) -> list[dict[str, Any]]:
         return _rows(db.fetch_all("SELECT * FROM portfolio_products ORDER BY created_at"))
 
-    @app.post("/assets", status_code=201, tags=["setup"], dependencies=[Depends(require_write_access)])
+    @app.post("/assets", status_code=201, tags=["setup"], dependencies=[Depends(require_operator)])
     def upsert_assets(payload: list[AssetInput], db: Database = Depends(get_database)) -> dict[str, int]:
         if not payload:
             raise HTTPException(status_code=422, detail="at least one asset is required")
@@ -140,7 +179,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             raise _domain_error(error) from error
         return {"upserted": len(payload)}
 
-    @app.post("/products", status_code=201, tags=["portfolios"], dependencies=[Depends(require_write_access)])
+    @app.post("/products", status_code=201, tags=["portfolios"], dependencies=[Depends(require_operator)])
     def create_product(
         payload: ProductCreate,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -167,7 +206,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
         except (ValueError, sqlite3.IntegrityError) as error:
             raise _domain_error(error) from error
 
-    @app.post("/market-prices", status_code=201, tags=["market-data"], dependencies=[Depends(require_write_access)])
+    @app.post("/market-prices", status_code=201, tags=["market-data"], dependencies=[Depends(require_operator)])
     def import_market_prices(payload: PriceBatchInput, db: Database = Depends(get_database)) -> dict[str, int]:
         try:
             count = db.upsert_prices(
@@ -177,7 +216,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             raise _domain_error(error) from error
         return {"upserted": count}
 
-    @app.post("/research", status_code=201, tags=["research"], dependencies=[Depends(require_write_access)])
+    @app.post("/research", status_code=201, tags=["research"], dependencies=[Depends(require_operator)])
     def create_research(payload: ResearchCreate, db: Database = Depends(get_database)) -> dict[str, str]:
         try:
             report = ResearchReport(
@@ -204,7 +243,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             raise _domain_error(error) from error
         return {"report_id": payload.report_id, "status": "final" if payload.finalize else "draft"}
 
-    @app.post("/proposals", status_code=201, tags=["workflow"], dependencies=[Depends(require_write_access)])
+    @app.post("/proposals", status_code=201, tags=["workflow"], dependencies=[Depends(require_operator)])
     def create_portfolio_proposal(payload: ProposalCreate, db: Database = Depends(get_database)) -> dict[str, str]:
         try:
             run_id = create_proposal(
@@ -223,7 +262,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             raise _domain_error(error) from error
         return {"run_id": run_id, "state": "proposed"}
 
-    @app.post("/workflows/{run_id}/risk-review", tags=["workflow"], dependencies=[Depends(require_write_access)])
+    @app.post("/workflows/{run_id}/risk-review", tags=["workflow"], dependencies=[Depends(require_operator)])
     def review_workflow_risk(
         run_id: str, payload: RiskReviewInput, db: Database = Depends(get_database)
     ) -> dict[str, Any]:
@@ -241,7 +280,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             "checks": [asdict(item) for item in report.checks],
         }
 
-    @app.post("/workflows/{run_id}/committee-decision", tags=["workflow"], dependencies=[Depends(require_write_access)])
+    @app.post("/workflows/{run_id}/committee-decision", tags=["workflow"], dependencies=[Depends(require_admin)])
     def decide_workflow(
         run_id: str, payload: CommitteeDecisionInput, db: Database = Depends(get_database)
     ) -> dict[str, str]:
@@ -254,7 +293,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
             raise _domain_error(error) from error
         return {"run_id": run_id, "decision": decision}
 
-    @app.post("/workflows/{run_id}/publish", tags=["workflow"], dependencies=[Depends(require_write_access)])
+    @app.post("/workflows/{run_id}/publish", tags=["workflow"], dependencies=[Depends(require_admin)])
     def publish_workflow(
         run_id: str,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -370,7 +409,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
 
     @app.post(
         "/alerts/{alert_id}/acknowledge", tags=["operations"],
-        dependencies=[Depends(require_write_access)],
+        dependencies=[Depends(require_admin)],
     )
     def acknowledge_alert(
         alert_id: str, payload: AlertLifecycleInput, db: Database = Depends(get_database)
@@ -386,7 +425,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
 
     @app.post(
         "/alerts/{alert_id}/resolve", tags=["operations"],
-        dependencies=[Depends(require_write_access)],
+        dependencies=[Depends(require_admin)],
     )
     def resolve_alert(
         alert_id: str, payload: AlertLifecycleInput, db: Database = Depends(get_database)
@@ -412,7 +451,7 @@ def create_app(database_path: str | Path | None = None, *, api_key: str | None =
 
     @app.post(
         "/model-policy/circuit-reset", tags=["ai-operations"],
-        dependencies=[Depends(require_write_access)],
+        dependencies=[Depends(require_admin)],
     )
     def reset_circuit(
         payload: CircuitResetInput, db: Database = Depends(get_database)

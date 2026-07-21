@@ -136,3 +136,10 @@ python scripts/generate_research.py path\to\research-input.json
 可通过 `FUNDOS_LLM_MAX_DAILY_COST_USD`、`FUNDOS_LLM_MAX_DAILY_TOKENS` 和
 `FUNDOS_LLM_CIRCUIT_FAILURE_THRESHOLD` 设置每日预算及连续失败熔断阈值；设为 `0`
 表示关闭对应限制。策略触发时不会调用模型，并会写入运营告警。
+
+## API 权限
+
+`FUNDOS_API_KEY` 保持向后兼容并具有 `admin` 权限。生产环境可使用
+`FUNDOS_API_KEYS_JSON` 配置分级密钥，例如
+`{"operations-key":"operator","governance-key":"admin"}`。`operator` 可维护数据、研究、
+提案及风险审查；投委会决策、组合发布、告警处置和模型熔断重置仅允许 `admin`。

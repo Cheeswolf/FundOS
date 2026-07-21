@@ -129,6 +129,49 @@ class ApiTests(unittest.TestCase):
         ])
         self.assertEqual(response.status_code, 401)
 
+    def test_role_scoped_keys_separate_operations_from_admin_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            role_app = create_app(
+                Path(directory) / "roles.sqlite3",
+                api_keys={"operator-secret": "operator", "admin-secret": "admin"},
+            )
+            with TestClient(role_app) as client:
+                operator = {"X-API-Key": "operator-secret"}
+                admin = {"X-API-Key": "admin-secret"}
+                created = client.post("/assets", headers=operator, json=[
+                    {"symbol": "A", "name": "Asset", "asset_class": "equity"}
+                ])
+                self.assertEqual(created.status_code, 201)
+                self.assertEqual(client.get("/products").status_code, 200)
+                decision_payload = {
+                    "approved": True, "rationale": "Approved", "decided_by": "committee",
+                }
+                self.assertEqual(
+                    client.post("/workflows/missing/committee-decision", headers=operator, json=decision_payload).status_code,
+                    403,
+                )
+                self.assertNotEqual(
+                    client.post("/workflows/missing/committee-decision", headers=admin, json=decision_payload).status_code,
+                    403,
+                )
+                reset_payload = {
+                    "provider": "fixture", "model": "model-a",
+                    "reset_by": "operator", "reason": "test",
+                }
+                self.assertEqual(
+                    client.post("/model-policy/circuit-reset", headers=operator, json=reset_payload).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    client.post("/model-policy/circuit-reset", headers=admin, json=reset_payload).status_code,
+                    200,
+                )
+
+    def test_rejects_invalid_role_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "roles"):
+                create_app(Path(directory) / "invalid.sqlite3", api_keys={"key": "viewer"})
+
     def test_complete_write_workflow(self) -> None:
         assets = self.client.post("/assets", headers=self.write_headers, json=[
             {"symbol": "EQUITY", "name": "Equity", "asset_class": "equity"},
