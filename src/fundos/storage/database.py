@@ -172,6 +172,37 @@ CREATE TABLE IF NOT EXISTS committee_decisions (
     decided_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS review_reports (
+    review_id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    research_report_id TEXT NOT NULL REFERENCES research_reports(report_id),
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    actual_return REAL NOT NULL,
+    counterfactual_return REAL NOT NULL,
+    rebalance_effect REAL NOT NULL,
+    summary TEXT NOT NULL,
+    lessons TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (product_id, period_start, period_end)
+);
+
+CREATE TABLE IF NOT EXISTS review_contributions (
+    review_id TEXT NOT NULL REFERENCES review_reports(review_id),
+    asset_symbol TEXT NOT NULL REFERENCES assets(symbol),
+    contribution REAL NOT NULL,
+    PRIMARY KEY (review_id, asset_symbol)
+);
+
+CREATE TABLE IF NOT EXISTS research_view_outcomes (
+    review_id TEXT NOT NULL REFERENCES review_reports(review_id),
+    asset_symbol TEXT NOT NULL REFERENCES assets(symbol),
+    direction TEXT NOT NULL,
+    realized_return REAL NOT NULL,
+    was_correct INTEGER NOT NULL CHECK (was_correct IN (0, 1)),
+    PRIMARY KEY (review_id, asset_symbol)
+);
 """
 
 
