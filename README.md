@@ -80,3 +80,14 @@ OpenAPI 文档默认位于 `http://127.0.0.1:8000/docs`。查询接口覆盖产�
 周期任务会审计数据新鲜度、重算业绩并提示周度投委会或月度复盘是否到期。行情过期时任务进入阻断状态，不会继续推动投资决策。
 
 周期结果可通过 `GET /products/{product_id}/operations` 查询，便于接入仪表盘、系统定时任务和外部告警。
+
+## 真实市场数据
+
+系统支持通过 [Alpha Vantage 官方日线接口](https://www.alphavantage.co/documentation/#daily) 同步真实市场数据。API Key 只从环境变量读取：
+
+```powershell
+$env:ALPHA_VANTAGE_API_KEY = "your-key"
+.\.venv\bin\python.exe scripts/sync_market_data.py --compact
+```
+
+MVP 配置使用 ETF 作为资产类别代理，映射关系位于 `config/market_data.alpha_vantage.json`。这些代理价格不等同于指数点位或场外基金净值，正式组合上线前需要替换为获得授权且与产品说明书一致的数据源。

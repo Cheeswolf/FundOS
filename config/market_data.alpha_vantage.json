@@ -1,0 +1,14 @@
+{
+  "provider_name": "alpha-vantage-etf-proxy",
+  "symbols": {
+    "CSI300": "MCHI",
+    "CSI500": "ASHS",
+    "NASDAQ100": "QQQ",
+    "GOLD": "GLD",
+    "BOND": "IEF",
+    "CASH": "BIL",
+    "BALANCED_BENCHMARK": "AOR"
+  },
+  "notes": "MVP 使用交易所交易基金作为资产类别代理，并非对应指数或场外基金净值。"
+}
+
