@@ -101,3 +101,12 @@ MVP 配置使用 ETF 作为资产类别代理，映射关系位于 `config/marke
 每个资产同步步骤会按指数退避进行有限重试。管道运行及步骤结果保存在 `pipeline_runs` 和 `pipeline_steps`，部分失败会返回非零退出码，便于系统定时任务触发告警。
 
 运行日志可通过 `GET /pipeline-runs` 查询，告警通过 `GET /alerts` 查询。设置 `FUNDOS_ALERT_WEBHOOK_URL` 后，失败或部分失败的生产运行会尝试发送 JSON Webhook；发送失败的事件保留在数据库中，后续运行可以重试。
+
+## 容器部署
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+```
+
+服务启动时自动执行版本化数据库迁移，SQLite 数据保存在独立卷中。生产管道输出 JSON 结构化日志，可由容器日志平台直接采集。

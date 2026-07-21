@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from fundos.data_providers import AlphaVantageDailyProvider  # noqa: E402
+from fundos.core import configure_logging  # noqa: E402
 from fundos.domain import Asset  # noqa: E402
 from fundos.services import deliver_pending_alerts, run_production_pipeline  # noqa: E402
 from fundos.storage import Database  # noqa: E402
@@ -20,7 +21,9 @@ def main() -> None:
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument("--retry-delay", type=float, default=1.0)
+    parser.add_argument("--log-level", default="INFO")
     arguments = parser.parse_args()
+    configure_logging(arguments.log_level)
     api_key = os.environ.get("ALPHA_VANTAGE_API_KEY", "")
     if not api_key:
         raise SystemExit("ALPHA_VANTAGE_API_KEY is required")

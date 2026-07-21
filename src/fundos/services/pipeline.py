@@ -1,4 +1,5 @@
 import time
+import logging
 from dataclasses import dataclass
 from datetime import date
 from typing import Callable, Mapping, Protocol, Sequence
@@ -8,6 +9,10 @@ from fundos.data_providers import AlphaVantageError, PriceRow
 from fundos.services.operations import run_operations_cycle
 from fundos.services.alerts import create_alert
 from fundos.storage import Database
+
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 class DailyPriceProvider(Protocol):
@@ -47,6 +52,7 @@ def run_production_pipeline(
             "INSERT INTO pipeline_runs (run_id, as_of_date, provider, status) VALUES (?, ?, ?, 'running')",
             (run_id, as_of_date.isoformat(), provider_name),
         )
+    logger.info("production pipeline started", extra={"event": "pipeline_started", "run_id": run_id})
 
     price_rows_written = 0
     successful_steps = 0
@@ -90,12 +96,28 @@ def run_production_pipeline(
                 )
                 price_rows_written += count
                 record_step(step_name, "succeeded", attempt, count, f"同步 {count} 条行情")
+                logger.info(
+                    "market data step succeeded",
+                    extra={
+                        "event": "pipeline_step", "run_id": run_id,
+                        "step_name": step_name, "status": "succeeded",
+                        "attempts": attempt, "rows_written": count,
+                    },
+                )
                 break
             except (AlphaVantageError, OSError, ValueError) as error:
                 if attempt == max_attempts:
                     message = f"{internal_symbol}/{provider_symbol}: {error}"
                     errors.append(message)
                     record_step(step_name, "failed", attempt, 0, message)
+                    logger.error(
+                        "market data step failed",
+                        extra={
+                            "event": "pipeline_step", "run_id": run_id,
+                            "step_name": step_name, "status": "failed",
+                            "attempts": attempt, "error": str(error),
+                        },
+                    )
                 else:
                     sleep(retry_delay_seconds * (2 ** (attempt - 1)))
 
@@ -148,6 +170,13 @@ def run_production_pipeline(
             title=f"FundOS 生产管道{status}",
             message=" | ".join(errors) if errors else "生产管道存在失败步骤",
         )
+    logger.info(
+        "production pipeline completed",
+        extra={
+            "event": "pipeline_completed", "run_id": run_id,
+            "status": status, "rows_written": price_rows_written,
+        },
+    )
     return PipelineResult(
         run_id, status, price_rows_written, successful_steps,
         failed_steps, tuple(errors),

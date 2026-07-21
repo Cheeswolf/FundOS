@@ -8,6 +8,7 @@ from typing import Any
 
 from fundos.domain.models import Asset, InvestmentMandate, PortfolioProduct, PortfolioVersion, PositionWeight
 from fundos.analytics.time_series import DatedNav, DatedPrice
+from fundos.storage.migrations import apply_migrations
 
 
 SCHEMA = """
@@ -290,20 +291,11 @@ class Database:
 
     def initialize(self) -> None:
         with self.connect() as connection:
-            connection.executescript(SCHEMA)
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(portfolio_versions)")}
-            if "status" not in columns:
-                connection.execute("ALTER TABLE portfolio_versions ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'")
-            if "published_at" not in columns:
-                connection.execute("ALTER TABLE portfolio_versions ADD COLUMN published_at TEXT")
-            mandate_columns = {row[1] for row in connection.execute("PRAGMA table_info(investment_mandates)")}
-            if "maximum_data_age_days" not in mandate_columns:
-                connection.execute("ALTER TABLE investment_mandates ADD COLUMN maximum_data_age_days INTEGER NOT NULL DEFAULT 3")
-            if "maximum_stress_loss" not in mandate_columns:
-                connection.execute("ALTER TABLE investment_mandates ADD COLUMN maximum_stress_loss REAL NOT NULL DEFAULT 0.20")
-            proposal_columns = {row[1] for row in connection.execute("PRAGMA table_info(portfolio_proposals)")}
-            if "research_report_id" not in proposal_columns:
-                connection.execute("ALTER TABLE portfolio_proposals ADD COLUMN research_report_id TEXT")
+            apply_migrations(connection, SCHEMA)
+
+    def get_schema_version(self) -> int:
+        rows = self.fetch_all("SELECT MAX(version) AS version FROM schema_migrations")
+        return int(rows[0]["version"] or 0)
 
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]

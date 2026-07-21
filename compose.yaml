@@ -1,0 +1,17 @@
+services:
+  fundos:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      FUNDOS_DB_PATH: /app/data/fundos.sqlite3
+      FUNDOS_API_KEY: ${FUNDOS_API_KEY:-}
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      FUNDOS_ALERT_WEBHOOK_URL: ${FUNDOS_ALERT_WEBHOOK_URL:-}
+    volumes:
+      - fundos-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  fundos-data:
+
