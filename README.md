@@ -148,3 +148,14 @@ python scripts/generate_research.py path\to\research-input.json
 管理员可通过 `/audit-events/integrity` 校验哈希链，通过 `/audit-events/export.csv`
 导出记录，并通过 `POST /audit-events/retention?days=365` 执行保留策略。清理至少保留
 30 天，且会保存链锚点以继续验证剩余记录。
+
+## 数据库备份与恢复
+
+```powershell
+python scripts/backup_database.py
+python scripts/drill_recovery.py
+python scripts/restore_database.py backups\fundos-xxx.sqlite3 data\fundos.sqlite3 --replace
+```
+
+备份包含 SHA-256、文件大小、迁移版本及关键表行数清单。恢复前必须通过完整性校验；
+替换已有数据库时会先生成恢复前副本。建议定期运行非破坏性的恢复演练，而不仅是检查备份文件存在。
