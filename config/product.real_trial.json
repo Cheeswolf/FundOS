@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "status": "fund_candidates_selected",
+  "product": {
+    "product_id": "fundos-index-allocation-trial",
+    "name": "FundOS 指数资产配置组合（受控试运行）",
+    "objective": "在不使用杠杆和自动交易的前提下，通过跨资产配置争取中长期稳健增值，并控制组合回撤。",
+    "target_user": "能够理解净值波动、投资期限不少于三年的自主决策型投资者",
+    "investment_horizon_years": 3,
+    "risk_level": "medium",
+    "valuation_currency": "CNY",
+    "performance_nature": "forward_simulation",
+    "public_distribution": false
+  },
+  "schedule": {
+    "market_data": "daily",
+    "research": "weekly",
+    "rebalance_review": "weekly",
+    "scheduled_rebalance": "monthly",
+    "review": "monthly",
+    "event_driven_risk_review": true
+  },
+  "constraints": {
+    "weight_sum": 1.0,
+    "maximum_single_asset_weight": 0.35,
+    "minimum_cash_weight": 0.05,
+    "maximum_turnover_per_rebalance": 0.20,
+    "maximum_data_age_days": 3,
+    "maximum_stress_loss": 0.18,
+    "leverage_allowed": false,
+    "automatic_trading_allowed": false,
+    "human_approval_required": true
+  },
+  "strategic_allocation": [
+    {"symbol": "CSI300", "target": 0.25, "minimum": 0.15, "maximum": 0.35},
+    {"symbol": "CSI500", "target": 0.10, "minimum": 0.00, "maximum": 0.20},
+    {"symbol": "NASDAQ100", "target": 0.15, "minimum": 0.05, "maximum": 0.25},
+    {"symbol": "GOLD", "target": 0.15, "minimum": 0.05, "maximum": 0.25},
+    {"symbol": "BOND", "target": 0.30, "minimum": 0.20, "maximum": 0.40},
+    {"symbol": "CASH", "target": 0.05, "minimum": 0.05, "maximum": 0.15}
+  ],
+  "benchmark": {
+    "symbol": "TRIAL_60_40_BENCHMARK",
+    "method": "daily_rebalanced_composite",
+    "components": [
+      {"symbol": "CSI300", "weight": 0.40},
+      {"symbol": "NASDAQ100", "weight": 0.20},
+      {"symbol": "BOND", "weight": 0.40}
+    ]
+  },
+  "data_policy": {
+    "trial_source": "tushare-pro",
+    "production_source": "licensed-provider-required",
+    "price_field_preference": ["adj_nav", "accum_nav", "unit_nav", "close"],
+    "record_announcement_date": true,
+    "record_source_timestamp": true,
+    "reject_unlicensed_public_redistribution": true,
+    "instruments": [
+      {
+        "symbol": "CSI300",
+        "reference_index": "沪深300指数",
+        "candidate_provider_code": "000300.SH",
+        "selected_instrument": {
+          "type": "off_exchange_fund",
+          "fund_code": "000051",
+          "provider_code": "000051.OF",
+          "metadata_name_contains": "沪深300ETF联接",
+          "share_class": "A",
+          "name": "华夏沪深300ETF联接A",
+          "selection_status": "provisional"
+        }
+      },
+      {
+        "symbol": "CSI500",
+        "reference_index": "中证500指数",
+        "candidate_provider_code": "000905.SH",
+        "selected_instrument": {
+          "type": "off_exchange_fund",
+          "fund_code": "160119",
+          "provider_code": "160119.SZ",
+          "metadata_name_contains": "中证500ETF联接",
+          "share_class": "A",
+          "name": "南方中证500ETF联接（LOF）A",
+          "selection_status": "provisional"
+        }
+      },
+      {
+        "symbol": "NASDAQ100",
+        "reference_index": "纳斯达克100指数人民币计价暴露",
+        "candidate_provider_code": null,
+        "selected_instrument": {
+          "type": "off_exchange_fund",
+          "fund_code": "270042",
+          "provider_code": "270042.OF",
+          "metadata_name_contains": "纳斯达克100ETF联接",
+          "share_class": "人民币A",
+          "name": "广发纳指100ETF联接（QDII）人民币A",
+          "selection_status": "provisional"
+        }
+      },
+      {
+        "symbol": "GOLD",
+        "reference_index": "境内黄金资产",
+        "candidate_provider_code": null,
+        "selected_instrument": {
+          "type": "off_exchange_fund",
+          "fund_code": "000307",
+          "provider_code": "000307.OF",
+          "metadata_name_contains": "黄金ETF联接",
+          "share_class": "A",
+          "name": "易方达黄金ETF联接A",
+          "selection_status": "provisional"
+        }
+      },
+      {
+        "symbol": "BOND",
+        "reference_index": "中短久期人民币债券资产",
+        "candidate_provider_code": null,
+        "selected_instrument": {
+          "type": "off_exchange_fund",
+          "fund_code": "161119",
+          "provider_code": "161119.SZ",
+          "metadata_name_contains": "中债新综合债券指数",
+          "share_class": "A",
+          "name": "易方达中债新综指（LOF）A",
+          "selection_status": "provisional",
+          "scope_note": "该基金跟踪综合债券指数，久期并非固定中短久期；需在风险审查中核验久期暴露。"
+        }
+      },
+      {
+        "symbol": "CASH",
+        "reference_index": "人民币现金或货币市场基金",
+        "candidate_provider_code": null,
+        "selected_instrument": {
+          "type": "cash_ledger",
+          "fund_code": null,
+          "provider_code": null,
+          "share_class": null,
+          "name": "人民币现金账本",
+          "selection_status": "provisional",
+          "valuation_method": "zero_return_until_cash_yield_policy_is_approved"
+        }
+      }
+    ]
+  },
+  "activation_gates": [
+    "五类风险资产的候选基金份额及人民币现金账本通过人工确认",
+    "历史数据覆盖不少于三个完整自然年",
+    "数据字段、复权规则和公告日期通过抽样核验",
+    "费用、净值确认时点和非共同交易日规则完成配置",
+    "投资说明书经人工确认",
+    "公开展示前完成数据授权与合规审核"
+  ]
+}

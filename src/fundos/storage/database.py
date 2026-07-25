@@ -29,6 +29,21 @@ CREATE TABLE IF NOT EXISTS market_prices (
     PRIMARY KEY (provider, symbol, trade_date)
 );
 
+CREATE TABLE IF NOT EXISTS market_data_observations (
+    provider TEXT NOT NULL,
+    provider_symbol TEXT NOT NULL,
+    symbol TEXT NOT NULL REFERENCES assets(symbol),
+    valuation_date TEXT NOT NULL,
+    announced_date TEXT NOT NULL,
+    available_date TEXT NOT NULL,
+    value_field TEXT NOT NULL,
+    raw_value REAL NOT NULL CHECK (raw_value > 0),
+    normalized_value REAL NOT NULL CHECK (normalized_value > 0),
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    retrieved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (provider, provider_symbol, valuation_date)
+);
+
 CREATE TABLE IF NOT EXISTS portfolio_products (
     product_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -375,6 +390,62 @@ class Database:
                 INSERT INTO market_prices (provider, symbol, trade_date, close)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(provider, symbol, trade_date) DO UPDATE SET close = excluded.close
+                """,
+                values,
+            )
+        return len(values)
+
+    def upsert_market_data_observations(
+        self,
+        rows: Iterable[tuple[str, str, str, date, date, date, str, float, float]],
+    ) -> int:
+        values = [
+            (
+                provider,
+                provider_symbol,
+                symbol,
+                valuation_date.isoformat(),
+                announced_date.isoformat(),
+                available_date.isoformat(),
+                value_field,
+                raw_value,
+                normalized_value,
+            )
+            for (
+                provider,
+                provider_symbol,
+                symbol,
+                valuation_date,
+                announced_date,
+                available_date,
+                value_field,
+                raw_value,
+                normalized_value,
+            ) in rows
+        ]
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO market_data_observations (
+                    provider, provider_symbol, symbol, valuation_date,
+                    announced_date, available_date, value_field,
+                    raw_value, normalized_value
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider, provider_symbol, valuation_date) DO UPDATE SET
+                    symbol = excluded.symbol,
+                    announced_date = excluded.announced_date,
+                    available_date = excluded.available_date,
+                    value_field = excluded.value_field,
+                    raw_value = excluded.raw_value,
+                    normalized_value = excluded.normalized_value,
+                    revision = market_data_observations.revision + CASE
+                        WHEN market_data_observations.announced_date != excluded.announced_date
+                          OR market_data_observations.available_date != excluded.available_date
+                          OR market_data_observations.value_field != excluded.value_field
+                          OR market_data_observations.raw_value != excluded.raw_value
+                          OR market_data_observations.normalized_value != excluded.normalized_value
+                        THEN 1 ELSE 0 END,
+                    retrieved_at = CURRENT_TIMESTAMP
                 """,
                 values,
             )

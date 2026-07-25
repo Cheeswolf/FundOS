@@ -151,6 +151,26 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
                 """
             )
 
+    def add_market_data_observations(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_data_observations (
+                provider TEXT NOT NULL,
+                provider_symbol TEXT NOT NULL,
+                symbol TEXT NOT NULL REFERENCES assets(symbol),
+                valuation_date TEXT NOT NULL,
+                announced_date TEXT NOT NULL,
+                available_date TEXT NOT NULL,
+                value_field TEXT NOT NULL,
+                raw_value REAL NOT NULL CHECK (raw_value > 0),
+                normalized_value REAL NOT NULL CHECK (normalized_value > 0),
+                revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+                retrieved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (provider, provider_symbol, valuation_date)
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -159,6 +179,7 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(5, "add_api_audit_log", add_api_audit_log),
         Migration(6, "add_audit_integrity_chain", add_audit_integrity_chain),
         Migration(7, "ensure_model_call_cost_column", ensure_model_call_cost_column),
+        Migration(8, "add_market_data_observations", add_market_data_observations),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:
