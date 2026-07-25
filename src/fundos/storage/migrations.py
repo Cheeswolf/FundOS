@@ -216,6 +216,23 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_evidence_collection_runs(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS evidence_collection_runs (
+                run_id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES research_evidence_sources(source_id),
+                status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+                discovered_count INTEGER NOT NULL DEFAULT 0,
+                imported_count INTEGER NOT NULL DEFAULT 0,
+                duplicate_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -227,6 +244,7 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(8, "add_market_data_observations", add_market_data_observations),
         Migration(9, "add_research_evidence_content", add_research_evidence_content),
         Migration(10, "add_raw_research_evidence_store", add_raw_research_evidence_store),
+        Migration(11, "add_evidence_collection_runs", add_evidence_collection_runs),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

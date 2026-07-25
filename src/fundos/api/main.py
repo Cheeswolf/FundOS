@@ -635,6 +635,23 @@ def create_app(
             row["asset_symbols"] = json.loads(row["asset_symbols"])
         return rows
 
+    @app.get(
+        "/evidence-collection-runs",
+        tags=["research"],
+        dependencies=[Depends(require_admin)],
+    )
+    def list_evidence_collection_runs(
+        limit: int = Query(default=50, ge=1, le=500),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        return _rows(db.fetch_all(
+            """
+            SELECT * FROM evidence_collection_runs
+            ORDER BY started_at DESC LIMIT ?
+            """,
+            (limit,),
+        ))
+
     @app.post(
         "/research-evidence/{raw_evidence_id}/review",
         tags=["research"],

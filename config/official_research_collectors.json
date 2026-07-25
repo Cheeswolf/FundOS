@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "collectors": [
+    {
+      "source_id": "pbc-official",
+      "index_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125431/125475/index.html",
+      "article_url_pattern": "/zhengcehuobisi/125207/125213/125431/125475/20[0-9]{17}/index\\.html$",
+      "content_markers": ["zoom", "content"],
+      "asset_symbols": ["BOND", "CASH"]
+    },
+    {
+      "source_id": "nbs-official",
+      "index_url": "https://www.stats.gov.cn/sj/zxfb/",
+      "article_url_pattern": "/sj/zxfb/20[0-9]{4}/t20[0-9]+_[0-9]+\\.html$",
+      "content_markers": ["trs_editor", "article-content"],
+      "asset_symbols": ["CSI300", "CSI500", "BOND"]
+    }
+  ]
+}

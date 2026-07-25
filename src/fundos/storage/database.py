@@ -173,6 +173,18 @@ CREATE TABLE IF NOT EXISTS raw_research_evidence (
     UNIQUE (source_id, url, content_sha256)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_collection_runs (
+    run_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES research_evidence_sources(source_id),
+    status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+    discovered_count INTEGER NOT NULL DEFAULT 0,
+    imported_count INTEGER NOT NULL DEFAULT 0,
+    duplicate_count INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS asset_views (
     view_id INTEGER PRIMARY KEY AUTOINCREMENT,
     report_id TEXT NOT NULL REFERENCES research_reports(report_id),

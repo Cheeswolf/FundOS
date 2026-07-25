@@ -17,6 +17,7 @@ from .evidence_ingestion import (
     register_research_sources,
     review_raw_research_evidence,
 )
+from .evidence_collection import EvidenceCollectionResult, run_evidence_collection
 from .review import ReviewResult, generate_review_report
 from .versioned_performance import PerformanceResult, calculate_and_store_versioned_performance
 from .trial_series import TrialSeriesResult, build_trial_valuation_series
@@ -57,11 +58,13 @@ __all__ = [
     "finalize_research_report",
     "validate_research_agent_request",
     "EvidenceImportResult",
+    "EvidenceCollectionResult",
     "EvidenceReviewResult",
     "build_approved_research_request",
     "import_raw_research_evidence",
     "register_research_sources",
     "review_raw_research_evidence",
+    "run_evidence_collection",
     "ReviewResult",
     "generate_review_report",
     "RiskCheck",

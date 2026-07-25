@@ -10,6 +10,23 @@ ResearchAgent 已接入受控投研入口，但不会自动调仓或交易。它
 python scripts/register_research_sources.py
 ```
 
+自动采集中国人民银行和国家统计局最近公开资料：
+
+```powershell
+python scripts/sync_research_evidence.py --max-items 5
+```
+
+也可以只运行一个来源：
+
+```powershell
+python scripts/sync_research_evidence.py --source pbc-official --max-items 5
+python scripts/sync_research_evidence.py --source nbs-official --max-items 5
+```
+
+采集器使用 `config/official_research_collectors.json` 中的固定入口、文章链接规则和
+正文标记，不进行开放式全站爬取。页面结构变化、正文缺失、证书错误或时间校验失败
+会导致该来源运行失败并写入 `evidence_collection_runs`，不会生成占位证据。
+
 复制 `config/raw_evidence.example.json`，填写真实标题、原始 URL、发布时间、
 涉及资产和事实正文，然后导入：
 

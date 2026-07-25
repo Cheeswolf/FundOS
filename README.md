@@ -11,7 +11,7 @@ FundOS 是一个面向标准化投资组合的投研、风控、审批、发布�
 | 投资组合核心 | 已完成 | 组合版本、净值、绩效、基准、归因和调仓记录 |
 | 投研决策闭环 | 已完成 | 研究证据、组合提案、风险审查、投委会决策、发布和复盘 |
 | AI 研究 | 已完成受控入口 | DeepSeek V4 Flash、证据正文约束、输出校验、调用审计、成本预算和熔断 |
-| 研究证据 | 已完成 2C 受控闭环 | 来源白名单、原始证据库、哈希去重、不可变审核决定和批准证据自动转换 |
+| 研究证据 | 已完成 2D 最小闭环 | PBC/NBS 自动采集、原始证据库、哈希去重、不可变审核和批准证据自动转换 |
 | 数据与运营 | 已完成真实试用链路 | Tushare 基金净值、统一估值序列、每日运营周期、生产管道、重试和告警 |
 | API 与界面 | 已完成 | 真实试用产品仪表盘、产品切换、历史模拟披露和 AI 运营指标 |
 | 安全与审计 | 已完成基础版本 | operator/admin 权限、操作审计、哈希链、导出和保留策略 |
@@ -182,6 +182,17 @@ python scripts/generate_research.py config\research.real_trial.2026-07-26.json
 python scripts/register_research_sources.py
 python scripts/import_research_evidence.py config\raw_evidence.2026-07-26.json
 ```
+
+不希望人工填写证据时，可从[中国人民银行公开市场业务](https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125431/125475/index.html)
+和[国家统计局数据发布](https://www.stats.gov.cn/sj/zxfb/)自动采集最近公开资料：
+
+```powershell
+python scripts/sync_research_evidence.py --max-items 5
+```
+
+采集器只跟随配置白名单内的文章链接，解析失败时不会生成证据。每次运行会记录
+发现数、新增数、重复数、错误和完成状态，可通过 `GET /evidence-collection-runs`
+查询。采集结果统一进入 `pending`，仍需人工审核后才能用于 ResearchAgent。
 
 原始证据会记录来源、发布时间、采集时间、资产范围和内容哈希，并以 `pending`
 状态进入数据库。管理员审核通过后，系统只使用覆盖当前组合全部资产的 `approved`
