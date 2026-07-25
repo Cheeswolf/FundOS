@@ -1,14 +1,28 @@
 import json
+import ssl
 from datetime import date
 from typing import Callable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+import certifi
 
 from fundos.data_providers.csv_provider import PriceRow
 
 
 class AlphaVantageError(RuntimeError):
     pass
+
+
+def _response_preview(raw: bytes, limit: int = 160) -> str:
+    text = raw.decode("utf-8", errors="replace")
+    return " ".join(text.split())[:limit]
+
+
+def _verified_urlopen(request: Request, timeout: int):
+    context = ssl.create_default_context(cafile=certifi.where())
+    return urlopen(request, timeout=timeout, context=context)
 
 
 class AlphaVantageDailyProvider:
@@ -18,7 +32,7 @@ class AlphaVantageDailyProvider:
         self,
         api_key: str,
         *,
-        opener: Callable = urlopen,
+        opener: Callable = _verified_urlopen,
         timeout_seconds: int = 30,
     ) -> None:
         if not api_key.strip():
@@ -50,9 +64,36 @@ class AlphaVantageDailyProvider:
         )
         try:
             with self.opener(request, timeout=self.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise AlphaVantageError("failed to retrieve or decode market data") from error
+                raw_response = response.read()
+        except HTTPError as error:
+            preview = _response_preview(error.read())
+            detail = f": {preview}" if preview else ""
+            raise AlphaVantageError(
+                f"market data provider returned HTTP {error.code}{detail}"
+            ) from error
+        except URLError as error:
+            raise AlphaVantageError(
+                f"market data connection failed: {error.reason}"
+            ) from error
+        except (TimeoutError, OSError) as error:
+            raise AlphaVantageError(
+                f"market data connection failed: {type(error).__name__}: {error}"
+            ) from error
+
+        try:
+            decoded_response = raw_response.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise AlphaVantageError(
+                "market data provider returned a non-UTF-8 response"
+            ) from error
+        try:
+            payload = json.loads(decoded_response)
+        except json.JSONDecodeError as error:
+            preview = _response_preview(raw_response)
+            detail = f": {preview}" if preview else ""
+            raise AlphaVantageError(
+                f"market data provider returned a non-JSON response{detail}"
+            ) from error
 
         for error_key in ("Error Message", "Note", "Information"):
             if error_key in payload:
@@ -80,4 +121,3 @@ class AlphaVantageDailyProvider:
         if not rows:
             raise AlphaVantageError("provider returned no prices in the requested date range")
         return rows
-

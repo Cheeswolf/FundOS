@@ -4,6 +4,7 @@ import sys
 import unittest
 from datetime import date
 from pathlib import Path
+from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
@@ -57,7 +58,28 @@ class AlphaVantageProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "API key"):
             AlphaVantageDailyProvider("")
 
+    def test_surfaces_connection_failure_reason(self) -> None:
+        def failed_opener(request, timeout):
+            raise URLError("TLS certificate verification failed")
+
+        provider = AlphaVantageDailyProvider("test-key", opener=failed_opener)
+        with self.assertRaisesRegex(
+            AlphaVantageError,
+            "connection failed: TLS certificate verification failed",
+        ):
+            provider.get_daily_prices("QQQ")
+
+    def test_surfaces_non_json_response_preview(self) -> None:
+        def html_opener(request, timeout):
+            return FakeResponse(b"<html>Access denied by proxy</html>")
+
+        provider = AlphaVantageDailyProvider("test-key", opener=html_opener)
+        with self.assertRaisesRegex(
+            AlphaVantageError,
+            "non-JSON response: <html>Access denied by proxy</html>",
+        ):
+            provider.get_daily_prices("QQQ")
+
 
 if __name__ == "__main__":
     unittest.main()
-

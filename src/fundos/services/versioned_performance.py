@@ -26,6 +26,16 @@ def calculate_and_store_versioned_performance(
     portfolio_symbols = sorted({position.asset_symbol for version in versions for position in version.weights})
     all_symbols = [*portfolio_symbols, benchmark_symbol]
     dates, aligned = align_prices(database.get_prices(provider, all_symbols), all_symbols)
+    first_effective_date = min(version.effective_date for version in versions)
+    start_index = next(
+        (index for index, trade_date in enumerate(dates) if trade_date >= first_effective_date),
+        len(dates),
+    )
+    dates = dates[start_index:]
+    aligned = {
+        symbol: values[start_index:]
+        for symbol, values in aligned.items()
+    }
     portfolio_nav = calculate_versioned_nav(
         dates,
         {symbol: aligned[symbol] for symbol in portfolio_symbols},
