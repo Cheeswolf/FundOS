@@ -140,7 +140,37 @@ CREATE TABLE IF NOT EXISTS research_evidence (
     title TEXT NOT NULL,
     source TEXT NOT NULL,
     url TEXT NOT NULL,
-    published_at TEXT NOT NULL
+    published_at TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS research_evidence_sources (
+    source_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_type TEXT NOT NULL CHECK (source_type IN ('official', 'licensed', 'internal')),
+    allowed_domains TEXT NOT NULL,
+    asset_symbols TEXT NOT NULL,
+    license_note TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS raw_research_evidence (
+    raw_evidence_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES research_evidence_sources(source_id),
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    published_at TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    asset_symbols TEXT NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (review_status IN ('pending', 'approved', 'rejected')),
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    review_note TEXT,
+    UNIQUE (source_id, url, content_sha256)
 );
 
 CREATE TABLE IF NOT EXISTS asset_views (

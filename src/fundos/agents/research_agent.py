@@ -52,6 +52,7 @@ class ResearchAgent:
                         "source": item.source,
                         "url": item.url,
                         "published_at": item.published_at.isoformat(),
+                        "content": item.content,
                     }
                     for item in evidence
                 ],

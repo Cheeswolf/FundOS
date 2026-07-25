@@ -65,6 +65,19 @@ class AuditedLanguageModel:
                     input_tokens, output_tokens, estimated_cost_usd, prompt_sha256,
                     error_message, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(call_id) DO UPDATE SET
+                    purpose = excluded.purpose,
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    status = excluded.status,
+                    attempts = excluded.attempts,
+                    latency_ms = excluded.latency_ms,
+                    input_tokens = excluded.input_tokens,
+                    output_tokens = excluded.output_tokens,
+                    estimated_cost_usd = excluded.estimated_cost_usd,
+                    prompt_sha256 = excluded.prompt_sha256,
+                    error_message = excluded.error_message,
+                    created_at = excluded.created_at
                 """,
                 (
                     self.call_id, self.purpose, self.provider_name, self.model_name, status,

@@ -2,7 +2,7 @@
 
 FundOS 是一个面向标准化投资组合的投研、风控、审批、发布和复盘系统。
 
-截至 2026-07-25，项目已经完成核心业务闭环，进入**受控试运行准备后期**。当前版本适合本地演示、内部模拟组合和测试环境部署，尚未声明为面向公众的正式生产系统。
+截至 2026-07-26，项目已经完成核心业务闭环，并跑通真实基金净值驱动的受控试用产品。当前版本适合本地演示、内部历史模拟和受控测试，尚未声明为面向公众的正式生产系统。
 
 ## 当前进度
 
@@ -10,12 +10,13 @@ FundOS 是一个面向标准化投资组合的投研、风控、审批、发布�
 |---|---|---|
 | 投资组合核心 | 已完成 | 组合版本、净值、绩效、基准、归因和调仓记录 |
 | 投研决策闭环 | 已完成 | 研究证据、组合提案、风险审查、投委会决策、发布和复盘 |
-| AI 研究 | 已完成基础生产能力 | 结构化草稿、证据约束、输出校验、调用审计、成本预算和熔断 |
-| 数据与运营 | 已完成 MVP | CSV/Alpha Vantage 行情、每日运营周期、生产管道、重试和告警 |
-| API 与界面 | 已完成 | 读写 API、运营仪表盘、AI 运营指标 |
+| AI 研究 | 已完成受控入口 | DeepSeek V4 Flash、证据正文约束、输出校验、调用审计、成本预算和熔断 |
+| 研究证据 | 已完成 2B 最小版本 | 来源白名单、原始证据库、域名/资产校验、SHA-256 去重和待审核状态 |
+| 数据与运营 | 已完成真实试用链路 | Tushare 基金净值、统一估值序列、每日运营周期、生产管道、重试和告警 |
+| API 与界面 | 已完成 | 真实试用产品仪表盘、产品切换、历史模拟披露和 AI 运营指标 |
 | 安全与审计 | 已完成基础版本 | operator/admin 权限、操作审计、哈希链、导出和保留策略 |
 | 灾难恢复 | 已完成 | 在线备份、清单校验、受控恢复和非破坏性恢复演练 |
-| 自动化验证 | 已完成 | 81 项自动化测试、Python 编译检查和 GitHub Actions 配置 |
+| 自动化验证 | 已完成 | 109 项自动化测试、Python 编译检查和 GitHub Actions 配置 |
 
 当前成熟度估计：
 
@@ -53,7 +54,7 @@ scripts/                可运行演示
 tests/                  自动化测试
 ```
 
-当前计算链路已经可以完成多资产共同交易日对齐、价格收益率转换、固定权重组合净值计算和 SQLite 持久化。
+当前计算链路已经可以完成真实基金复权净值的时点安全导入、多资产交易日对齐、现金账本、复合基准、固定权重组合净值计算和 SQLite 持久化。
 
 组合版本会在其生效日开始参与下一收益区间计算，系统支持跨版本连续净值、基准归一化、超额收益及绩效快照持久化。
 
@@ -89,6 +90,21 @@ OpenAPI 文档默认位于 `http://127.0.0.1:8000/docs`。查询接口覆盖产�
 ```
 
 打开 `http://127.0.0.1:8000/dashboard`。界面提供组合总览、资产配置、投资说明书、投研观点、证据来源、风险检查、投委会记录和业绩复盘五个工作区。
+
+### GitHub 展示截图
+
+仓库预留以下两张产品截图：
+
+- `docs/screenshots/dashboard-overview.png`：真实数据试用产品的组合总览；
+- `docs/screenshots/agent-research.png`：DeepSeek 生成的投研观点与证据展示。
+
+截图应使用不包含 API Key、个人路径或其他敏感信息的页面。文件就位后，可在这里启用：
+
+```markdown
+![FundOS 真实数据组合总览](docs/screenshots/dashboard-overview.png)
+
+![FundOS Agent 投研观点](docs/screenshots/agent-research.png)
+```
 
 生成完整模拟演示数据：
 
@@ -148,21 +164,33 @@ GitHub Actions 会在 `main` 分支推送及 Pull Request 上自动执行完整�
 - [API 使用示例](docs/API_EXAMPLES.md)
 - [生产部署检查清单](docs/DEPLOYMENT_CHECKLIST.md)
 - [项目整体审计](docs/PROJECT_AUDIT.md)
+- [DeepSeek Agent 与可信证据操作手册](docs/AGENT_RESEARCH.md)
 
 ## AI 研究草稿
 
-系统支持通过兼容 Chat Completions 协议的模型服务生成结构化研究草稿。模型仅能使用输入文件中的可信证据，输出还会经过资产覆盖、证据引用、观点方向和置信度校验；生成结果保持 `draft` 状态，仍需人工确认和既有审批流程。
+系统默认使用 DeepSeek `deepseek-v4-flash` 生成结构化研究草稿。模型仅能使用输入文件中的可信证据正文，输出还会经过资产覆盖、证据引用、观点方向和置信度校验；生成结果保持 `draft` 状态，仍需人工确认和既有审批流程。
 
 ```powershell
 $env:FUNDOS_LLM_API_KEY = "your-key"
-$env:FUNDOS_LLM_MODEL = "your-model"
-$env:FUNDOS_LLM_BASE_URL = "https://your-provider.example/v1"
-python scripts/generate_research.py path\to\research-input.json
+$env:FUNDOS_LLM_MODEL = "deepseek-v4-flash"
+$env:FUNDOS_LLM_BASE_URL = "https://api.deepseek.com"
+python scripts/generate_research.py config\research.real_trial.2026-07-26.json
 ```
 
 可通过 `FUNDOS_LLM_MAX_DAILY_COST_USD`、`FUNDOS_LLM_MAX_DAILY_TOKENS` 和
 `FUNDOS_LLM_CIRCUIT_FAILURE_THRESHOLD` 设置每日预算及连续失败熔断阈值；设为 `0`
 表示关闭对应限制。策略触发时不会调用模型，并会写入运营告警。
+
+可信来源和原始证据库可通过以下命令初始化及导入：
+
+```powershell
+python scripts/register_research_sources.py
+python scripts/import_research_evidence.py config\raw_evidence.2026-07-26.json
+```
+
+原始证据会记录来源、发布时间、采集时间、资产范围和内容哈希，并以 `pending`
+状态进入数据库。目前 ResearchAgent 仍使用人工核验的单次任务文件；证据批准与
+自动转换属于下一阶段 2C。
 
 ## API 权限
 

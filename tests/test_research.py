@@ -51,6 +51,24 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(len(self.database.fetch_all("SELECT * FROM asset_views")), 1)
         self.assertEqual(len(self.database.fetch_all("SELECT * FROM asset_view_evidence")), 1)
 
+    def test_persists_evidence_content(self) -> None:
+        report = self.report()
+        evidence = report.evidence[0]
+        enriched = ResearchEvidence(
+            evidence.evidence_id, evidence.title, evidence.source, evidence.url,
+            evidence.published_at, "Official release excerpt used by the agent.",
+        )
+        create_research_report(
+            self.database,
+            ResearchReport(
+                report.report_id, report.product_id, report.as_of_date,
+                report.market_regime, report.summary, report.confidence,
+                (enriched,), report.asset_views,
+            ),
+        )
+        row = self.database.fetch_all("SELECT content FROM research_evidence")[0]
+        self.assertEqual(row["content"], "Official release excerpt used by the agent.")
+
     def test_rejects_future_evidence(self) -> None:
         report = self.report()
         future = ResearchReport(

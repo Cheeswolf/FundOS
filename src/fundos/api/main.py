@@ -258,7 +258,8 @@ def create_app(
                 payload.market_regime, payload.summary, payload.confidence,
                 tuple(
                     ResearchEvidence(
-                        item.evidence_id, item.title, item.source, item.url, item.published_at
+                        item.evidence_id, item.title, item.source, item.url,
+                        item.published_at, item.content,
                     )
                     for item in payload.evidence
                 ),

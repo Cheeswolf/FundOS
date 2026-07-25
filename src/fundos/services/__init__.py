@@ -8,6 +8,12 @@ from .model_operations import get_model_circuit_status, reset_model_circuit, upd
 from .pipeline import PipelineResult, run_production_pipeline
 from .publication import PublicationResult, publish_portfolio_version
 from .research import create_research_report, finalize_research_report
+from .agent_research import validate_research_agent_request
+from .evidence_ingestion import (
+    EvidenceImportResult,
+    import_raw_research_evidence,
+    register_research_sources,
+)
 from .review import ReviewResult, generate_review_report
 from .versioned_performance import PerformanceResult, calculate_and_store_versioned_performance
 from .trial_series import TrialSeriesResult, build_trial_valuation_series
@@ -46,6 +52,10 @@ __all__ = [
     "publish_portfolio_version",
     "create_research_report",
     "finalize_research_report",
+    "validate_research_agent_request",
+    "EvidenceImportResult",
+    "import_raw_research_evidence",
+    "register_research_sources",
     "ReviewResult",
     "generate_review_report",
     "RiskCheck",

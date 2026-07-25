@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "source_id": "pbc-official",
+      "name": "中国人民银行",
+      "source_type": "official",
+      "allowed_domains": ["pbc.gov.cn"],
+      "asset_symbols": ["BOND", "CASH", "CSI300", "CSI500"],
+      "license_note": "官方公开信息；保存和再分发前仍需核对页面使用条款。",
+      "enabled": true
+    },
+    {
+      "source_id": "nbs-official",
+      "name": "国家统计局",
+      "source_type": "official",
+      "allowed_domains": ["stats.gov.cn"],
+      "asset_symbols": ["CSI300", "CSI500", "BOND"],
+      "license_note": "官方公开统计信息；引用时保留来源、发布日期和统计口径。",
+      "enabled": true
+    },
+    {
+      "source_id": "nasdaq-official",
+      "name": "Nasdaq",
+      "source_type": "official",
+      "allowed_domains": ["nasdaq.com"],
+      "asset_symbols": ["NASDAQ100"],
+      "license_note": "官方公开页面；不声明获得行情再分发授权，仅用于受控研究证据。",
+      "enabled": true
+    },
+    {
+      "source_id": "wgc-official",
+      "name": "World Gold Council",
+      "source_type": "official",
+      "allowed_domains": ["gold.org"],
+      "asset_symbols": ["GOLD"],
+      "license_note": "机构公开研究资料；使用前核对具体页面版权和引用条款。",
+      "enabled": true
+    }
+  ]
+}

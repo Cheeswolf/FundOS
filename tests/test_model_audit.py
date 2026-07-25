@@ -51,3 +51,18 @@ class ModelAuditTests(unittest.TestCase):
         row = self.database.fetch_all("SELECT * FROM model_calls WHERE call_id = 'call-2'")[0]
         self.assertEqual((row["status"], row["attempts"]), ("failed", 3))
         self.assertIn("unavailable", row["error_message"])
+
+    def test_same_logical_call_can_succeed_after_a_recorded_failure(self) -> None:
+        with self.assertRaises(ModelProviderError):
+            self.audited(FailedModel(), "call-retry").complete(
+                system_prompt="s", user_prompt="u"
+            )
+        self.audited(SuccessfulModel(), "call-retry").complete(
+            system_prompt="s", user_prompt="u"
+        )
+        rows = self.database.fetch_all(
+            "SELECT * FROM model_calls WHERE call_id = 'call-retry'"
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "succeeded")
+        self.assertIsNone(rows[0]["error_message"])

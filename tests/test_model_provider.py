@@ -1,4 +1,5 @@
 import json
+import ssl
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +10,21 @@ from fundos.agents import ModelProviderError, OpenAICompatibleProvider  # noqa: 
 
 
 class ModelProviderTests(unittest.TestCase):
+    def test_default_transport_uses_certifi_trust_store(self) -> None:
+        from unittest.mock import patch
+
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"{}"
+        with patch("fundos.agents.provider.urlopen", return_value=response) as opener:
+            from fundos.agents.provider import _default_transport
+
+            _default_transport(unittest.mock.MagicMock(), 10)
+
+        context = opener.call_args.kwargs["context"]
+        self.assertIsInstance(context, ssl.SSLContext)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
     def test_calls_chat_completions_with_json_contract(self) -> None:
         captured = {}
 

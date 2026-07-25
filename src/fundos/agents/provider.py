@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import ssl
 import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+import certifi
 
 
 class ModelProviderError(RuntimeError):
@@ -33,7 +36,10 @@ HttpTransport = Callable[[Request, float], bytes]
 
 
 def _default_transport(request: Request, timeout: float) -> bytes:
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is operator configured
+    context = ssl.create_default_context(cafile=certifi.where())
+    with urlopen(  # noqa: S310 - URL is operator configured
+        request, timeout=timeout, context=context
+    ) as response:
         return response.read()
 
 

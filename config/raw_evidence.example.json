@@ -1,0 +1,12 @@
+{
+  "evidence": [
+    {
+      "source_id": "pbc-official",
+      "title": "填写原始资料的真实标题",
+      "url": "https://www.pbc.gov.cn/填写原始页面路径",
+      "published_at": "2026-07-24T09:00:00+08:00",
+      "asset_symbols": ["BOND", "CASH"],
+      "content": "填写从原始资料核验后的事实摘录或摘要，不要填写投资建议。"
+    }
+  ]
+}

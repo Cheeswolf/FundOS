@@ -41,6 +41,7 @@ class EvidenceInput(BaseModel):
     source: str = Field(min_length=1)
     url: str = Field(min_length=1)
     published_at: datetime
+    content: str = Field(default="", max_length=12000)
 
 
 class AssetViewInput(BaseModel):

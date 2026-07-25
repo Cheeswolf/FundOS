@@ -26,11 +26,14 @@ def create_research_report(database: Database, report: ResearchReport) -> str:
         connection.executemany(
             """
             INSERT INTO research_evidence
-                (evidence_id, report_id, title, source, url, published_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (evidence_id, report_id, title, source, url, published_at, content)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                (item.evidence_id, report.report_id, item.title, item.source, item.url, item.published_at.isoformat())
+                (
+                    item.evidence_id, report.report_id, item.title, item.source,
+                    item.url, item.published_at.isoformat(), item.content,
+                )
                 for item in report.evidence
             ],
         )
@@ -74,4 +77,3 @@ def finalize_research_report(database: Database, *, report_id: str) -> None:
             "UPDATE research_reports SET status = 'final', finalized_at = ? WHERE report_id = ?",
             (datetime.now(timezone.utc).isoformat(), report_id),
         )
-

@@ -85,10 +85,13 @@ class ResearchEvidence:
     source: str
     url: str
     published_at: datetime
+    content: str = ""
 
     def __post_init__(self) -> None:
         if not self.title.strip() or not self.source.strip() or not self.url.strip():
             raise ValueError("evidence title, source and URL are required")
+        if len(self.content) > 12000:
+            raise ValueError("research evidence content cannot exceed 12000 characters")
 
 
 @dataclass(frozen=True, slots=True)

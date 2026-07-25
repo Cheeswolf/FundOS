@@ -171,6 +171,51 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_research_evidence_content(target: sqlite3.Connection) -> None:
+        if target.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'research_evidence'"
+        ).fetchone() is None:
+            return
+        columns = {row[1] for row in target.execute("PRAGMA table_info(research_evidence)")}
+        if "content" not in columns:
+            target.execute(
+                "ALTER TABLE research_evidence ADD COLUMN content TEXT NOT NULL DEFAULT ''"
+            )
+
+    def add_raw_research_evidence_store(target: sqlite3.Connection) -> None:
+        target.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS research_evidence_sources (
+                source_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                source_type TEXT NOT NULL
+                    CHECK (source_type IN ('official', 'licensed', 'internal')),
+                allowed_domains TEXT NOT NULL,
+                asset_symbols TEXT NOT NULL,
+                license_note TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS raw_research_evidence (
+                raw_evidence_id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES research_evidence_sources(source_id),
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                retrieved_at TEXT NOT NULL,
+                content TEXT NOT NULL,
+                content_sha256 TEXT NOT NULL,
+                asset_symbols TEXT NOT NULL,
+                review_status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (review_status IN ('pending', 'approved', 'rejected')),
+                reviewed_by TEXT,
+                reviewed_at TEXT,
+                review_note TEXT,
+                UNIQUE (source_id, url, content_sha256)
+            );
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -180,6 +225,8 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(6, "add_audit_integrity_chain", add_audit_integrity_chain),
         Migration(7, "ensure_model_call_cost_column", ensure_model_call_cost_column),
         Migration(8, "add_market_data_observations", add_market_data_observations),
+        Migration(9, "add_research_evidence_content", add_research_evidence_content),
+        Migration(10, "add_raw_research_evidence_store", add_raw_research_evidence_store),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

@@ -29,6 +29,7 @@ class ResearchAgentTests(unittest.TestCase):
                 source="licensed-source",
                 url="https://example.test/e1",
                 published_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+                content="The observed data show improving breadth and stable volatility.",
             ),
         )
 
@@ -69,6 +70,7 @@ class ResearchAgentTests(unittest.TestCase):
         self.assertEqual(len(report.asset_views), 2)
         supplied = json.loads(model.prompts[0][1])
         self.assertEqual(supplied["evidence"][0]["evidence_id"], "E1")
+        self.assertIn("improving breadth", supplied["evidence"][0]["content"])
 
     def test_rejects_unknown_evidence_citation(self) -> None:
         payload = self.payload()

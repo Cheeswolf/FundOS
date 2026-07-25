@@ -9,3 +9,7 @@ __pycache__/
 .obsidian/
 backups/
 logs/
+config/research.real_trial.*.json
+!config/research.real_trial.example.json
+config/raw_evidence.*.json
+!config/raw_evidence.example.json

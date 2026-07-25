@@ -1,0 +1,23 @@
+{
+  "report_id": "fundos-trial-research-YYYY-MM-DD",
+  "product_id": "fundos-index-allocation-trial",
+  "as_of_date": "YYYY-MM-DD",
+  "asset_symbols": [
+    "CSI300",
+    "CSI500",
+    "NASDAQ100",
+    "GOLD",
+    "BOND",
+    "CASH"
+  ],
+  "evidence": [
+    {
+      "evidence_id": "official-source-1",
+      "title": "Replace with an official or licensed source title",
+      "source": "Replace with source organization",
+      "url": "https://replace-with-the-source-url.example",
+      "published_at": "YYYY-MM-DDT00:00:00+08:00",
+      "content": "Paste a concise, attributable excerpt or factual summary that the agent may use. Do not paste unsupported opinions."
+    }
+  ]
+}
