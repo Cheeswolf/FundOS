@@ -93,18 +93,13 @@ OpenAPI 文档默认位于 `http://127.0.0.1:8000/docs`。查询接口覆盖产�
 
 ### GitHub 展示截图
 
-仓库预留以下两张产品截图：
+真实基金净值驱动的受控试用产品总览：
 
-- `docs/screenshots/dashboard-overview.png`：真实数据试用产品的组合总览；
-- `docs/screenshots/agent-research.png`：DeepSeek 生成的投研观点与证据展示。
-
-截图应使用不包含 API Key、个人路径或其他敏感信息的页面。文件就位后，可在这里启用：
-
-```markdown
 ![FundOS 真实数据组合总览](docs/screenshots/dashboard-overview.png)
 
+DeepSeek ResearchAgent 生成并通过结构校验的投研草稿：
+
 ![FundOS Agent 投研观点](docs/screenshots/agent-research.png)
-```
 
 生成完整模拟演示数据：
 
