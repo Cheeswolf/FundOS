@@ -22,6 +22,7 @@ def main() -> None:
     )
     parser.add_argument("--source-provider", default="tushare-fund-nav")
     parser.add_argument("--target-provider", default="fundos-trial-normalized")
+    parser.add_argument("--maximum-carry-days", type=int)
     arguments = parser.parse_args()
 
     configuration = json.loads(arguments.config.read_text(encoding="utf-8"))
@@ -39,6 +40,11 @@ def main() -> None:
     if len(cash_symbols) != 1:
         raise SystemExit("trial configuration must contain exactly one cash ledger")
     benchmark = configuration["benchmark"]
+    maximum_carry_days = (
+        arguments.maximum_carry_days
+        if arguments.maximum_carry_days is not None
+        else configuration["data_policy"]["valuation_alignment"]["maximum_carry_days"]
+    )
     result = build_trial_valuation_series(
         Database(arguments.database),
         source_provider=arguments.source_provider,
@@ -50,12 +56,18 @@ def main() -> None:
             item["symbol"]: item["weight"]
             for item in benchmark["components"]
         },
+        maximum_carry_days=maximum_carry_days,
     )
     print(
         f"Built {arguments.target_provider}: {result.source_rows} fund rows, "
         f"{result.cash_rows} cash rows, {result.benchmark_rows} benchmark rows"
     )
     print(f"Coverage: {result.first_date} to {result.last_date}")
+    print(
+        f"Alignment: {result.valuation_dates} dates, "
+        f"{result.carried_values} carried values, "
+        f"maximum age {result.maximum_age_days} days"
+    )
 
 
 if __name__ == "__main__":

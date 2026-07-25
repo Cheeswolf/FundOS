@@ -67,6 +67,13 @@
     "trial_source": "tushare-pro",
     "production_source": "licensed-provider-required",
     "price_field_preference": ["adj_nav", "accum_nav", "unit_nav", "close"],
+    "valuation_alignment": {
+      "method": "point_in_time_asof_carry_forward",
+      "date_basis": "available_date",
+      "maximum_carry_days": 14,
+      "future_backfill_allowed": false,
+      "common_series_required": true
+    },
     "record_announcement_date": true,
     "record_source_timestamp": true,
     "reject_unlicensed_public_redistribution": true,

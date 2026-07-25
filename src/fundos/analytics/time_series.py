@@ -17,6 +17,13 @@ class DatedNav:
     nav: float
 
 
+@dataclass(frozen=True, slots=True)
+class AlignmentQuality:
+    observation_dates: int
+    carried_values: int
+    maximum_age_days: int
+
+
 def align_prices(
     prices: Iterable[DatedPrice],
     symbols: Sequence[str],
@@ -52,6 +59,79 @@ def align_prices(
         for symbol in required_symbols
     }
     return dates, aligned
+
+
+def align_prices_asof(
+    prices: Iterable[DatedPrice],
+    symbols: Sequence[str],
+    *,
+    maximum_age_days: int = 14,
+) -> tuple[list[date], dict[str, list[float]], AlignmentQuality]:
+    """Align asynchronous observations without using information from the future.
+
+    Dates are drawn from the union of observations inside the period covered by
+    every symbol.  Missing values are carried forward only when their age stays
+    within ``maximum_age_days``.
+    """
+    required_symbols = tuple(symbols)
+    if not required_symbols or len(required_symbols) != len(set(required_symbols)):
+        raise ValueError("symbols must be a non-empty unique sequence")
+    if maximum_age_days < 0:
+        raise ValueError("maximum price age days cannot be negative")
+
+    by_symbol: dict[str, dict[date, float]] = defaultdict(dict)
+    for item in prices:
+        if item.symbol not in required_symbols:
+            continue
+        if item.close <= 0:
+            raise ValueError("prices must be positive")
+        if item.trade_date in by_symbol[item.symbol]:
+            raise ValueError(f"duplicate price for {item.symbol} on {item.trade_date}")
+        by_symbol[item.symbol][item.trade_date] = item.close
+
+    missing_symbols = set(required_symbols) - set(by_symbol)
+    if missing_symbols:
+        raise ValueError(f"no prices for symbols: {', '.join(sorted(missing_symbols))}")
+
+    first_date = max(min(by_symbol[symbol]) for symbol in required_symbols)
+    last_date = min(max(by_symbol[symbol]) for symbol in required_symbols)
+    dates = sorted({
+        observed_date
+        for symbol in required_symbols
+        for observed_date in by_symbol[symbol]
+        if first_date <= observed_date <= last_date
+    })
+    if len(dates) < 2:
+        raise ValueError("at least two aligned price dates are required")
+
+    aligned = {symbol: [] for symbol in required_symbols}
+    latest_dates: dict[str, date] = {
+        symbol: max(
+            observed_date
+            for observed_date in by_symbol[symbol]
+            if observed_date <= dates[0]
+        )
+        for symbol in required_symbols
+    }
+    carried_values = 0
+    maximum_age = 0
+    for valuation_date in dates:
+        for symbol in required_symbols:
+            if valuation_date in by_symbol[symbol]:
+                latest_dates[symbol] = valuation_date
+            source_date = latest_dates.get(symbol)
+            if source_date is None:
+                raise ValueError(f"no price available for {symbol} on {valuation_date}")
+            age_days = (valuation_date - source_date).days
+            if age_days > maximum_age_days:
+                raise ValueError(
+                    f"price for {symbol} is {age_days} days old on {valuation_date}"
+                )
+            aligned[symbol].append(by_symbol[symbol][source_date])
+            if age_days:
+                carried_values += 1
+                maximum_age = max(maximum_age, age_days)
+    return dates, aligned, AlignmentQuality(len(dates), carried_values, maximum_age)
 
 
 def prices_to_returns(
@@ -90,4 +170,3 @@ def returns_to_dated_nav(
             raise ValueError("a periodic return cannot be less than or equal to -100%")
         result.append(DatedNav(nav_date, result[-1].nav * (1 + periodic_return)))
     return result
-

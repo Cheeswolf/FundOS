@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from fundos.analytics import (
-    align_prices,
+    align_prices_asof,
     calculate_portfolio_returns,
     prices_to_returns,
     returns_to_dated_nav,
@@ -18,6 +18,9 @@ class TrialSeriesResult:
     benchmark_rows: int
     first_date: str
     last_date: str
+    valuation_dates: int
+    carried_values: int
+    maximum_age_days: int
 
 
 def build_trial_valuation_series(
@@ -29,6 +32,7 @@ def build_trial_valuation_series(
     cash_symbol: str,
     benchmark_symbol: str,
     benchmark_weights: Mapping[str, float],
+    maximum_carry_days: int = 14,
 ) -> TrialSeriesResult:
     if not fund_symbols or len(set(fund_symbols)) != len(fund_symbols):
         raise ValueError("fund symbols must be a non-empty unique sequence")
@@ -47,23 +51,27 @@ def build_trial_valuation_series(
         Asset(cash_symbol, "人民币现金账本", "cash"),
         Asset(benchmark_symbol, "受控试运行60/40复合基准", "benchmark"),
     ])
+    dates, aligned, quality = align_prices_asof(
+        source_prices,
+        tuple(fund_symbols),
+        maximum_age_days=maximum_carry_days,
+    )
     source_rows = database.upsert_prices(
-        (target_provider, row.symbol, row.trade_date, row.close)
-        for row in source_prices
+        (target_provider, symbol, valuation_date, aligned[symbol][index])
+        for index, valuation_date in enumerate(dates)
+        for symbol in fund_symbols
     )
 
-    all_dates = sorted({row.trade_date for row in source_prices})
     cash_rows = database.upsert_prices(
         (target_provider, cash_symbol, trade_date, 1.0)
-        for trade_date in all_dates
+        for trade_date in dates
     )
 
-    benchmark_prices = [
-        row for row in source_prices if row.symbol in benchmark_weights
-    ]
-    dates, aligned = align_prices(benchmark_prices, tuple(benchmark_weights))
     returns = calculate_portfolio_returns(
-        prices_to_returns(aligned),
+        prices_to_returns({
+            symbol: aligned[symbol]
+            for symbol in benchmark_weights
+        }),
         benchmark_weights,
     )
     benchmark_nav = returns_to_dated_nav(dates, returns)
@@ -75,6 +83,9 @@ def build_trial_valuation_series(
         source_rows,
         cash_rows,
         benchmark_rows,
-        all_dates[0].isoformat(),
-        all_dates[-1].isoformat(),
+        dates[0].isoformat(),
+        dates[-1].isoformat(),
+        quality.observation_dates,
+        quality.carried_values,
+        quality.maximum_age_days,
     )
