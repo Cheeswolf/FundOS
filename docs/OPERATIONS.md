@@ -68,6 +68,27 @@ python scripts/run_production.py --attempts 3 --retry-delay 1
 ```
 
 建议由系统任务每天收盘后运行一次。进程退出码为零表示全部成功，非零表示部分失败或完全失败。
+命令默认使用名为 `daily-production-pipeline` 的数据库租约锁，租约为 3600 秒。
+重复触发时，后启动的实例会记录为 `skipped` 并正常退出，不会重复同步或重算。
+
+可按部署环境调整：
+
+```powershell
+python scripts/run_production.py `
+  --job-name daily-production-pipeline `
+  --lease-seconds 7200
+```
+
+每次触发都会写入 `scheduled_job_runs`。状态包括：
+
+- `running`：正在执行；
+- `succeeded`：正常完成；
+- `failed`：执行异常；
+- `skipped`：已有有效租约，本次未执行；
+- `abandoned`：旧实例未完成且租约过期，已由新实例接管。
+
+活动租约位于 `scheduled_job_locks`。正常完成或失败时自动释放；进程崩溃不会永久
+锁死任务，新实例可在租约到期后接管。租约时间应大于生产管道通常所需的最长时间。
 
 ### 单独同步行情
 
@@ -158,4 +179,3 @@ GET /products/{product_id}/operations
 ## 8. SQLite 运行边界
 
 当前 SQLite 方案适合 MVP 单实例运行。不要同时启动多个写入副本，也不要将同一数据库文件挂载给多个容器实例。需要多实例、高并发或更严格高可用时，应先迁移至 PostgreSQL。
-

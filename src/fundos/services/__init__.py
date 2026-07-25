@@ -6,6 +6,7 @@ from .audit_log import purge_audit_events, record_audit_event, verify_audit_chai
 from .operations import OperationsCycleResult, run_operations_cycle
 from .model_operations import get_model_circuit_status, reset_model_circuit, update_alert_lifecycle
 from .pipeline import PipelineResult, run_production_pipeline
+from .scheduler import ScheduledJobResult, run_scheduled_job
 from .publication import PublicationResult, publish_portfolio_version
 from .research import create_research_report, finalize_research_report
 from .agent_research import validate_research_agent_request
@@ -48,6 +49,8 @@ __all__ = [
     "update_alert_lifecycle",
     "PipelineResult",
     "run_production_pipeline",
+    "ScheduledJobResult",
+    "run_scheduled_job",
     "calculate_and_store_versioned_performance",
     "TrialSeriesResult",
     "build_trial_valuation_series",
