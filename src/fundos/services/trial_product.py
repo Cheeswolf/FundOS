@@ -122,6 +122,8 @@ def initialize_trial_product(
         product_id=product_id,
         provider=provider,
         benchmark_symbol=benchmark_symbol,
+        transaction_cost_rate=_approved_transaction_cost_rate(configuration),
+        charge_initial_allocation=_charge_initial_allocation(configuration),
     )
     return TrialProductResult(
         product_id,
@@ -131,3 +133,23 @@ def initialize_trial_product(
         created_version,
         performance,
     )
+
+
+def _approved_transaction_cost_rate(configuration: Mapping[str, Any]) -> float:
+    performance_policy = configuration.get("performance_policy", {})
+    policy = performance_policy.get("rebalance_costs", {})
+    if not isinstance(policy, Mapping):
+        return 0.0
+    rate_bps = policy.get("rate_bps")
+    if policy.get("approval_status") != "approved" or rate_bps is None:
+        return 0.0
+    rate = float(rate_bps) / 10_000
+    if not 0 <= rate < 1:
+        raise ValueError("approved rebalance cost rate is invalid")
+    return rate
+
+
+def _charge_initial_allocation(configuration: Mapping[str, Any]) -> bool:
+    performance_policy = configuration.get("performance_policy", {})
+    policy = performance_policy.get("rebalance_costs", {})
+    return bool(policy.get("charge_initial_allocation", False)) if isinstance(policy, Mapping) else False

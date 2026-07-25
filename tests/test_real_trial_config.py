@@ -65,6 +65,13 @@ class RealTrialProductConfigTests(unittest.TestCase):
         self.assertEqual(provider_codes["CSI500"], "160119.SZ")
         self.assertEqual(provider_codes["BOND"], "161119.SZ")
 
+    def test_rebalance_cost_policy_is_explicit_but_not_silently_enabled(self) -> None:
+        policy = self.configuration["performance_policy"]["rebalance_costs"]
+        self.assertEqual(policy["model"], "one_way_turnover_times_rate")
+        self.assertEqual(policy["deduction_timing"], "effective_common_valuation_date")
+        self.assertIsNone(policy["rate_bps"])
+        self.assertEqual(policy["approval_status"], "pending")
+
 
 if __name__ == "__main__":
     unittest.main()

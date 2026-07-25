@@ -27,6 +27,8 @@ def run_operations_cycle(
     provider: str,
     benchmark_symbol: str,
     as_of_date: date,
+    transaction_cost_rate: float = 0.0,
+    charge_initial_allocation: bool = False,
 ) -> OperationsCycleResult:
     mandate_rows = database.fetch_all(
         "SELECT * FROM investment_mandates WHERE product_id = ?", (product_id,)
@@ -67,6 +69,8 @@ def run_operations_cycle(
             product_id=product_id,
             provider=provider,
             benchmark_symbol=benchmark_symbol,
+            transaction_cost_rate=transaction_cost_rate,
+            charge_initial_allocation=charge_initial_allocation,
         )
         performance_updated = True
 
@@ -134,4 +138,3 @@ def run_operations_cycle(
         data_age_days, performance_updated, weekly_decision_due,
         monthly_review_due, message,
     )
-
