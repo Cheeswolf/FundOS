@@ -18,6 +18,14 @@ class EvidenceImportResult:
     review_status: str
 
 
+@dataclass(frozen=True, slots=True)
+class EvidenceReviewResult:
+    raw_evidence_id: str
+    review_status: str
+    reviewed_by: str
+    reviewed_at: str
+
+
 def register_research_sources(
     database: Database,
     sources: Iterable[Mapping[str, Any]],
@@ -145,6 +153,137 @@ def import_raw_research_evidence(
     return EvidenceImportResult(raw_id, True, content_hash, "pending")
 
 
+def review_raw_research_evidence(
+    database: Database,
+    *,
+    raw_evidence_id: str,
+    approved: bool,
+    reviewed_by: str,
+    note: str,
+) -> EvidenceReviewResult:
+    evidence_id = raw_evidence_id.strip()
+    reviewer = reviewed_by.strip()
+    review_note = note.strip()
+    if not evidence_id or not reviewer or not review_note:
+        raise ValueError("evidence ID, reviewer and review note are required")
+    rows = database.fetch_all(
+        """
+        SELECT e.*, s.enabled FROM raw_research_evidence e
+        JOIN research_evidence_sources s ON s.source_id = e.source_id
+        WHERE e.raw_evidence_id = ?
+        """,
+        (evidence_id,),
+    )
+    if not rows:
+        raise ValueError("raw research evidence does not exist")
+    evidence = rows[0]
+    if evidence["review_status"] != "pending":
+        raise ValueError("only pending research evidence can be reviewed")
+    if approved and not evidence["enabled"]:
+        raise ValueError("evidence from a disabled source cannot be approved")
+    actual_hash = hashlib.sha256(evidence["content"].encode("utf-8")).hexdigest()
+    if actual_hash != evidence["content_sha256"]:
+        raise ValueError("research evidence content integrity check failed")
+    status = "approved" if approved else "rejected"
+    reviewed_at = datetime.now(timezone.utc).isoformat()
+    with database.connect() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE raw_research_evidence SET
+                review_status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ?
+            WHERE raw_evidence_id = ? AND review_status = 'pending'
+            """,
+            (status, reviewer, reviewed_at, review_note, evidence_id),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("research evidence was reviewed concurrently")
+    return EvidenceReviewResult(evidence_id, status, reviewer, reviewed_at)
+
+
+def build_approved_research_request(
+    database: Database,
+    *,
+    product_id: str,
+    report_id: str,
+    as_of_date: str,
+) -> dict[str, Any]:
+    product = product_id.strip()
+    report = report_id.strip()
+    if not product or not report:
+        raise ValueError("product and report IDs are required")
+    cutoff = _aware_date(as_of_date)
+    if database.fetch_all("SELECT 1 FROM research_reports WHERE report_id = ?", (report,)):
+        raise ValueError(f"research report already exists: {report}")
+    versions = database.fetch_all(
+        """
+        SELECT version_id FROM portfolio_versions
+        WHERE product_id = ? AND status = 'published' AND effective_date <= ?
+        ORDER BY effective_date DESC, version_number DESC LIMIT 1
+        """,
+        (product, cutoff),
+    )
+    if not versions:
+        raise ValueError("product has no published portfolio version by the report date")
+    symbols = [
+        row["asset_symbol"]
+        for row in database.fetch_all(
+            """
+            SELECT asset_symbol FROM portfolio_version_weights
+            WHERE version_id = ? ORDER BY asset_symbol
+            """,
+            (versions[0]["version_id"],),
+        )
+    ]
+    rows = database.fetch_all(
+        """
+        SELECT e.*, s.name AS source_name
+        FROM raw_research_evidence e
+        JOIN research_evidence_sources s ON s.source_id = e.source_id
+        WHERE e.review_status = 'approved' AND s.enabled = 1
+          AND substr(e.published_at, 1, 10) <= ?
+        ORDER BY e.published_at, e.raw_evidence_id
+        """,
+        (cutoff,),
+    )
+    selected = [
+        row for row in rows if set(json.loads(row["asset_symbols"])) & set(symbols)
+    ]
+    covered = {
+        symbol
+        for row in selected
+        for symbol in json.loads(row["asset_symbols"])
+        if symbol in symbols
+    }
+    missing = sorted(set(symbols) - covered)
+    if missing:
+        raise ValueError(
+            f"approved research evidence does not cover assets: {', '.join(missing)}"
+        )
+    for row in selected:
+        actual_hash = hashlib.sha256(row["content"].encode("utf-8")).hexdigest()
+        if actual_hash != row["content_sha256"]:
+            raise ValueError(
+                f"approved research evidence integrity check failed: {row['raw_evidence_id']}"
+            )
+    return {
+        "report_id": report,
+        "product_id": product,
+        "as_of_date": cutoff,
+        "asset_symbols": symbols,
+        "evidence": [
+            {
+                "evidence_id": row["raw_evidence_id"],
+                "title": row["title"],
+                "source": row["source_name"],
+                "url": row["url"],
+                "published_at": row["published_at"],
+                "content": row["content"],
+            }
+            for row in selected
+        ],
+    }
+
+
 def _clean_unique(value: object, label: str) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"{label} must be a non-empty list")
@@ -162,3 +301,12 @@ def _aware_datetime(value: object, label: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{label} must include a timezone")
     return parsed
+
+
+def _aware_date(value: object) -> str:
+    from datetime import date
+
+    try:
+        return date.fromisoformat(str(value)).isoformat()
+    except ValueError as error:
+        raise ValueError("as_of_date must be a valid ISO date") from error

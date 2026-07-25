@@ -1,7 +1,7 @@
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
@@ -9,7 +9,8 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from fundos.api import create_app  # noqa: E402
-from fundos.domain import PortfolioProduct  # noqa: E402
+from fundos.domain import Asset, PortfolioProduct  # noqa: E402
+from fundos.services import import_raw_research_evidence, register_research_sources  # noqa: E402
 
 
 class ApiTests(unittest.TestCase):
@@ -55,6 +56,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/alerts").json(), [])
         self.assertEqual(self.client.get("/model-calls").json(), [])
         self.assertIsNone(self.client.get("/model-calls/summary").json()["success_rate"])
+
+    def test_admin_reviews_raw_research_evidence(self) -> None:
+        self.app.state.database.upsert_assets([Asset("BOND", "Bond", "bond")])
+        register_research_sources(
+            self.app.state.database,
+            [{
+                "source_id": "official",
+                "name": "Official Source",
+                "source_type": "official",
+                "allowed_domains": ["official.example"],
+                "asset_symbols": ["BOND"],
+                "license_note": "Verified official source.",
+            }],
+        )
+        imported = import_raw_research_evidence(
+            self.app.state.database,
+            {
+                "source_id": "official",
+                "title": "Release",
+                "url": "https://official.example/release",
+                "published_at": "2026-07-24T08:00:00+08:00",
+                "asset_symbols": ["BOND"],
+                "content": "Verified factual excerpt.",
+            },
+            retrieved_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+        )
+        listing = self.client.get(
+            "/research-evidence?status=pending", headers=self.write_headers
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()[0]["asset_symbols"], ["BOND"])
+        reviewed = self.client.post(
+            f"/research-evidence/{imported.raw_evidence_id}/review",
+            headers=self.write_headers,
+            json={
+                "approved": True,
+                "reviewed_by": "governance-owner",
+                "note": "Source and content verified.",
+            },
+        )
+        self.assertEqual(reviewed.status_code, 200)
+        self.assertEqual(reviewed.json()["review_status"], "approved")
 
     def test_reports_model_call_usage_and_hides_prompt_hash(self) -> None:
         with self.app.state.database.connect() as connection:

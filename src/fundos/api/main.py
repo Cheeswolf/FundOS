@@ -17,9 +17,11 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 
 from fundos.api.schemas import (
     AssetInput,
+    ApprovedResearchRequestInput,
     AlertLifecycleInput,
     CircuitResetInput,
     CommitteeDecisionInput,
+    EvidenceReviewInput,
     PriceBatchInput,
     ProductCreate,
     ProposalCreate,
@@ -37,6 +39,7 @@ from fundos.domain import (
     ResearchReport,
 )
 from fundos.services import (
+    build_approved_research_request,
     create_proposal,
     create_research_report,
     finalize_research_report,
@@ -48,6 +51,7 @@ from fundos.services import (
     reset_model_circuit,
     run_risk_review,
     update_alert_lifecycle,
+    review_raw_research_evidence,
     verify_audit_chain,
 )
 from fundos.storage import Database
@@ -606,6 +610,71 @@ def create_app(
                 (report["report_id"],),
             ))
         return reports
+
+    @app.get(
+        "/research-evidence", tags=["research"], dependencies=[Depends(require_admin)],
+    )
+    def list_raw_research_evidence(
+        status: str | None = Query(default=None),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        if status is not None and status not in {"pending", "approved", "rejected"}:
+            raise HTTPException(status_code=422, detail="invalid evidence review status")
+        query = """
+            SELECT e.*, s.name AS source_name, s.source_type
+            FROM raw_research_evidence e
+            JOIN research_evidence_sources s ON s.source_id = e.source_id
+        """
+        parameters: tuple[Any, ...] = ()
+        if status is not None:
+            query += " WHERE e.review_status = ?"
+            parameters = (status,)
+        query += " ORDER BY e.published_at DESC, e.raw_evidence_id"
+        rows = _rows(db.fetch_all(query, parameters))
+        for row in rows:
+            row["asset_symbols"] = json.loads(row["asset_symbols"])
+        return rows
+
+    @app.post(
+        "/research-evidence/{raw_evidence_id}/review",
+        tags=["research"],
+        dependencies=[Depends(require_admin)],
+    )
+    def review_research_evidence(
+        raw_evidence_id: str,
+        payload: EvidenceReviewInput,
+        db: Database = Depends(get_database),
+    ) -> dict[str, Any]:
+        try:
+            return asdict(review_raw_research_evidence(
+                db,
+                raw_evidence_id=raw_evidence_id,
+                approved=payload.approved,
+                reviewed_by=payload.reviewed_by,
+                note=payload.note,
+            ))
+        except ValueError as error:
+            raise _domain_error(error) from error
+
+    @app.post(
+        "/products/{product_id}/approved-research-input",
+        tags=["research"],
+        dependencies=[Depends(require_admin)],
+    )
+    def create_approved_research_input(
+        product_id: str,
+        payload: ApprovedResearchRequestInput,
+        db: Database = Depends(get_database),
+    ) -> dict[str, Any]:
+        try:
+            return build_approved_research_request(
+                db,
+                product_id=product_id,
+                report_id=payload.report_id,
+                as_of_date=payload.as_of_date.isoformat(),
+            )
+        except ValueError as error:
+            raise _domain_error(error) from error
 
     @app.get("/workflows/{run_id}", tags=["workflow"])
     def get_workflow(run_id: str, db: Database = Depends(get_database)) -> dict[str, Any]:

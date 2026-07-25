@@ -18,12 +18,35 @@ python scripts/import_research_evidence.py config/你的原始证据文件.json
 ```
 
 导入过程会校验来源白名单、域名、资产覆盖和时间戳，保存采集时间及 SHA-256。
-重复内容不会再次写入。新证据固定进入 `pending` 状态，当前阶段不会自动提供给
-ResearchAgent；下一阶段需要完成审核和批准转换。
+重复内容不会再次写入。新证据固定进入 `pending` 状态。
+
+审核人核对原始链接、标题、日期、事实正文和资产标签后，执行批准或拒绝：
+
+```powershell
+python scripts/review_research_evidence.py raw-证据ID `
+  --approve `
+  --reviewed-by "审核人标识" `
+  --note "已核对来源、日期、正文和资产标签"
+```
+
+拒绝时将 `--approve` 改为 `--reject`。审核决定不可覆盖；如来源发布修订内容，
+应按新内容重新导入为另一条原始证据。
+
+批准证据覆盖当前组合全部资产后，可以自动生成 ResearchAgent 输入：
+
+```powershell
+python scripts/build_approved_research_input.py `
+  --report-id fundos-trial-research-2026-07-31 `
+  --as-of 2026-07-31 `
+  --output config/research.real_trial.2026-07-31.json
+```
+
+生成过程只读取 `approved` 证据，会重新校验内容哈希、来源状态、发布时间和资产
+覆盖。`pending`、`rejected`、来源已停用或内容完整性失败的记录均不会进入模型输入。
 
 ## 1. 准备投研输入
 
-复制 `config/research.real_trial.example.json`，例如保存为
+人工通道可复制 `config/research.real_trial.example.json`，例如保存为
 `config/research.real_trial.2026-07-26.json`。
 
 填写要求：
@@ -79,3 +102,5 @@ python scripts/generate_research.py config/research.real_trial.2026-07-26.json
 - 所有调用记录 Token、成本、耗时和错误；
 - 日成本、日 Token 和连续失败熔断均在模型调用前生效；
 - Agent 无交易权限，不能自行发布组合版本。
+- 原始证据审核 API 仅允许 `admin` 角色访问；
+- 证据审核决定不可修改，所有 API 审核操作进入审计日志。

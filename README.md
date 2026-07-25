@@ -11,7 +11,7 @@ FundOS 是一个面向标准化投资组合的投研、风控、审批、发布�
 | 投资组合核心 | 已完成 | 组合版本、净值、绩效、基准、归因和调仓记录 |
 | 投研决策闭环 | 已完成 | 研究证据、组合提案、风险审查、投委会决策、发布和复盘 |
 | AI 研究 | 已完成受控入口 | DeepSeek V4 Flash、证据正文约束、输出校验、调用审计、成本预算和熔断 |
-| 研究证据 | 已完成 2B 最小版本 | 来源白名单、原始证据库、域名/资产校验、SHA-256 去重和待审核状态 |
+| 研究证据 | 已完成 2C 受控闭环 | 来源白名单、原始证据库、哈希去重、不可变审核决定和批准证据自动转换 |
 | 数据与运营 | 已完成真实试用链路 | Tushare 基金净值、统一估值序列、每日运营周期、生产管道、重试和告警 |
 | API 与界面 | 已完成 | 真实试用产品仪表盘、产品切换、历史模拟披露和 AI 运营指标 |
 | 安全与审计 | 已完成基础版本 | operator/admin 权限、操作审计、哈希链、导出和保留策略 |
@@ -184,8 +184,21 @@ python scripts/import_research_evidence.py config\raw_evidence.2026-07-26.json
 ```
 
 原始证据会记录来源、发布时间、采集时间、资产范围和内容哈希，并以 `pending`
-状态进入数据库。目前 ResearchAgent 仍使用人工核验的单次任务文件；证据批准与
-自动转换属于下一阶段 2C。
+状态进入数据库。管理员审核通过后，系统只使用覆盖当前组合全部资产的 `approved`
+证据生成 ResearchAgent 输入，并再次校验来源状态、发布日期和内容完整性：
+
+```powershell
+python scripts/review_research_evidence.py raw-证据ID `
+  --approve --reviewed-by "审核人" --note "审核说明"
+python scripts/build_approved_research_input.py `
+  --report-id fundos-trial-research-2026-07-31 `
+  --as-of 2026-07-31 `
+  --output config\research.real_trial.2026-07-31.json
+```
+
+管理 API 提供 `GET /research-evidence`、`POST /research-evidence/{id}/review`
+和 `POST /products/{id}/approved-research-input`，均要求 `admin` 权限。仪表盘的
+“证据审核”页提供只读审核视图；生产环境的批准或拒绝操作通过管理 API 或命令行完成。
 
 ## API 权限
 

@@ -2,13 +2,21 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from fundos.domain import Asset  # noqa: E402
-from fundos.services import import_raw_research_evidence, register_research_sources  # noqa: E402
+from fundos.domain import (  # noqa: E402
+    Asset, PortfolioProduct, PortfolioVersion, PositionWeight,
+)
+from fundos.services import (  # noqa: E402
+    build_approved_research_request,
+    import_raw_research_evidence,
+    register_research_sources,
+    review_raw_research_evidence,
+)
 from fundos.storage import Database  # noqa: E402
 
 
@@ -33,6 +41,22 @@ class EvidenceIngestionTests(unittest.TestCase):
                 }
             ],
         )
+        self.database.create_product(
+            PortfolioProduct("P1", "Portfolio", "BM", datetime.now())
+        )
+        self.database.create_version(
+            PortfolioVersion(
+                "V1", "P1", 1, date(2026, 7, 1),
+                (
+                    PositionWeight("BOND", Decimal("0.8")),
+                    PositionWeight("CASH", Decimal("0.2")),
+                ),
+            )
+        )
+        with self.database.connect() as connection:
+            connection.execute(
+                "UPDATE portfolio_versions SET status = 'published' WHERE version_id = 'V1'"
+            )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -81,6 +105,53 @@ class EvidenceIngestionTests(unittest.TestCase):
                 self.database,
                 item,
                 retrieved_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+            )
+
+    def test_approves_pending_evidence_once_and_builds_agent_request(self) -> None:
+        imported = import_raw_research_evidence(
+            self.database,
+            self.item(),
+            retrieved_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+        )
+        reviewed = review_raw_research_evidence(
+            self.database,
+            raw_evidence_id=imported.raw_evidence_id,
+            approved=True,
+            reviewed_by="risk-owner",
+            note="Source, date and factual excerpt verified.",
+        )
+        self.assertEqual(reviewed.review_status, "approved")
+        with self.assertRaisesRegex(ValueError, "only pending"):
+            review_raw_research_evidence(
+                self.database,
+                raw_evidence_id=imported.raw_evidence_id,
+                approved=False,
+                reviewed_by="other",
+                note="Cannot overwrite an immutable decision.",
+            )
+        request = build_approved_research_request(
+            self.database,
+            product_id="P1",
+            report_id="R-APPROVED",
+            as_of_date="2026-07-25",
+        )
+        self.assertEqual(request["asset_symbols"], ["BOND", "CASH"])
+        self.assertEqual(
+            request["evidence"][0]["evidence_id"], imported.raw_evidence_id
+        )
+
+    def test_pending_evidence_cannot_be_used_for_agent_request(self) -> None:
+        import_raw_research_evidence(
+            self.database,
+            self.item(),
+            retrieved_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+        )
+        with self.assertRaisesRegex(ValueError, "does not cover assets"):
+            build_approved_research_request(
+                self.database,
+                product_id="P1",
+                report_id="R-PENDING",
+                as_of_date="2026-07-25",
             )
 
 

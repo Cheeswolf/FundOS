@@ -103,3 +103,14 @@ class CircuitResetInput(BaseModel):
 class AlertLifecycleInput(BaseModel):
     updated_by: str = Field(min_length=1)
     note: str = Field(min_length=1)
+
+
+class EvidenceReviewInput(BaseModel):
+    approved: bool
+    reviewed_by: str = Field(min_length=1)
+    note: str = Field(min_length=1)
+
+
+class ApprovedResearchRequestInput(BaseModel):
+    report_id: str = Field(min_length=1)
+    as_of_date: date

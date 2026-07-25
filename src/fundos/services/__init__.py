@@ -11,8 +11,11 @@ from .research import create_research_report, finalize_research_report
 from .agent_research import validate_research_agent_request
 from .evidence_ingestion import (
     EvidenceImportResult,
+    EvidenceReviewResult,
+    build_approved_research_request,
     import_raw_research_evidence,
     register_research_sources,
+    review_raw_research_evidence,
 )
 from .review import ReviewResult, generate_review_report
 from .versioned_performance import PerformanceResult, calculate_and_store_versioned_performance
@@ -54,8 +57,11 @@ __all__ = [
     "finalize_research_report",
     "validate_research_agent_request",
     "EvidenceImportResult",
+    "EvidenceReviewResult",
+    "build_approved_research_request",
     "import_raw_research_evidence",
     "register_research_sources",
+    "review_raw_research_evidence",
     "ReviewResult",
     "generate_review_report",
     "RiskCheck",
