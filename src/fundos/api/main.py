@@ -425,6 +425,52 @@ def create_app(
             ))
         return runs
 
+    @app.get("/scheduled-jobs/runs", tags=["operations"])
+    def list_scheduled_job_runs(
+        job_name: str | None = Query(default=None, min_length=1),
+        status: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        allowed_statuses = {"running", "succeeded", "failed", "skipped", "abandoned"}
+        if status is not None and status not in allowed_statuses:
+            raise HTTPException(status_code=422, detail="invalid scheduled job status")
+        conditions: list[str] = []
+        parameters: list[Any] = []
+        if job_name is not None:
+            conditions.append("job_name = ?")
+            parameters.append(job_name)
+        if status is not None:
+            conditions.append("status = ?")
+            parameters.append(status)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        parameters.append(limit)
+        return _rows(db.fetch_all(
+            f"""
+            SELECT run_id, job_name, status, started_at, completed_at,
+                   lease_until, message
+            FROM scheduled_job_runs
+            {where}
+            ORDER BY started_at DESC LIMIT ?
+            """,
+            tuple(parameters),
+        ))
+
+    @app.get("/scheduled-jobs/locks", tags=["operations"])
+    def list_scheduled_job_locks(
+        db: Database = Depends(get_database),
+    ) -> list[dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        locks = _rows(db.fetch_all(
+            """
+            SELECT job_name, acquired_at, lease_until
+            FROM scheduled_job_locks ORDER BY job_name
+            """
+        ))
+        for item in locks:
+            item["active"] = datetime.fromisoformat(item["lease_until"]) > now
+        return locks
+
     @app.get("/alerts", tags=["operations"])
     def list_alerts(
         status: str | None = Query(default=None),

@@ -171,8 +171,13 @@ Invoke-RestMethod "$baseUrl/products/balanced-product/research"
 Invoke-RestMethod "$baseUrl/products/balanced-product/workflows"
 Invoke-RestMethod "$baseUrl/products/balanced-product/reviews"
 Invoke-RestMethod "$baseUrl/pipeline-runs"
+Invoke-RestMethod "$baseUrl/scheduled-jobs/runs?job_name=daily-production-pipeline&limit=20"
+Invoke-RestMethod "$baseUrl/scheduled-jobs/locks"
 Invoke-RestMethod "$baseUrl/alerts?status=failed"
 ```
+
+计划任务状态包括 `running`、`succeeded`、`failed`、`skipped` 和
+`abandoned`。活动租约响应包含 `active` 布尔值，但不暴露内部 owner ID。
 
 ## 11. 常见响应状态
 
@@ -184,4 +189,3 @@ Invoke-RestMethod "$baseUrl/alerts?status=failed"
 | `404` | 产品或工作流不存在 |
 | `409` | 唯一约束或幂等键冲突 |
 | `422` | 输入或领域规则不合法 |
-

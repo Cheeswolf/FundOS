@@ -1,7 +1,7 @@
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
@@ -10,7 +10,11 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from fundos.api import create_app  # noqa: E402
 from fundos.domain import Asset, PortfolioProduct  # noqa: E402
-from fundos.services import import_raw_research_evidence, register_research_sources  # noqa: E402
+from fundos.services import (  # noqa: E402
+    import_raw_research_evidence,
+    register_research_sources,
+    run_scheduled_job,
+)
 
 
 class ApiTests(unittest.TestCase):
@@ -36,6 +40,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("组合总览", response.text)
         self.assertIn("fundos-index-allocation-trial", response.text)
         self.assertIn("历史模拟业绩", response.text)
+        self.assertIn("运行监控", response.text)
+        self.assertIn("/scheduled-jobs/runs", response.text)
 
     def test_lists_and_gets_product(self) -> None:
         self.app.state.database.create_product(
@@ -54,8 +60,43 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/products/missing/operations").json(), [])
         self.assertEqual(self.client.get("/pipeline-runs").json(), [])
         self.assertEqual(self.client.get("/alerts").json(), [])
+        self.assertEqual(self.client.get("/scheduled-jobs/runs").json(), [])
+        self.assertEqual(self.client.get("/scheduled-jobs/locks").json(), [])
         self.assertEqual(self.client.get("/model-calls").json(), [])
         self.assertIsNone(self.client.get("/model-calls/summary").json()["success_rate"])
+
+    def test_lists_scheduled_job_runs_and_active_locks_without_owner_id(self) -> None:
+        run_scheduled_job(
+            self.app.state.database,
+            job_name="daily-production",
+            task=lambda: "done",
+        )
+        runs = self.client.get("/scheduled-jobs/runs?job_name=daily-production").json()
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "succeeded")
+        self.assertNotIn("owner_id", runs[0])
+
+        now = datetime.now(timezone.utc)
+        with self.app.state.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scheduled_job_locks
+                    (job_name, owner_id, acquired_at, lease_until)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "weekly-research", "private-owner", now.isoformat(),
+                    (now + timedelta(minutes=10)).isoformat(),
+                ),
+            )
+        locks = self.client.get("/scheduled-jobs/locks").json()
+        self.assertEqual(locks[0]["job_name"], "weekly-research")
+        self.assertTrue(locks[0]["active"])
+        self.assertNotIn("owner_id", locks[0])
+
+    def test_rejects_invalid_scheduled_job_status_filter(self) -> None:
+        response = self.client.get("/scheduled-jobs/runs?status=unknown")
+        self.assertEqual(response.status_code, 422)
 
     def test_admin_reviews_raw_research_evidence(self) -> None:
         self.app.state.database.upsert_assets([Asset("BOND", "Bond", "bond")])

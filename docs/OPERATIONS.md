@@ -141,10 +141,16 @@ python scripts/sync_market_data.py --compact
 
 ```text
 GET /pipeline-runs
+GET /scheduled-jobs/runs
+GET /scheduled-jobs/locks
 GET /alerts?status=pending
 GET /alerts?status=failed
 GET /products/{product_id}/operations
 ```
+
+仪表盘“运行监控”页同时展示最近调度、生产管道、活动租约和异常运行数量。
+`/scheduled-jobs/runs` 支持 `job_name`、`status` 和 `limit` 查询参数；对外结果
+不会返回内部租约持有者 ID。
 
 ## 7. 故障处理
 
