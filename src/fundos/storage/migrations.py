@@ -141,6 +141,16 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def ensure_model_call_cost_column(target: sqlite3.Connection) -> None:
+        columns = {row[1] for row in target.execute("PRAGMA table_info(model_calls)")}
+        if "estimated_cost_usd" not in columns:
+            target.execute(
+                """
+                ALTER TABLE model_calls ADD COLUMN estimated_cost_usd REAL
+                CHECK (estimated_cost_usd IS NULL OR estimated_cost_usd >= 0)
+                """
+            )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -148,6 +158,7 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(4, "add_model_operations_control", add_model_operations_control),
         Migration(5, "add_api_audit_log", add_api_audit_log),
         Migration(6, "add_audit_integrity_chain", add_audit_integrity_chain),
+        Migration(7, "ensure_model_call_cost_column", ensure_model_call_cost_column),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:
