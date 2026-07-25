@@ -33,6 +33,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("FundOS 投资组合运营台", response.text)
         self.assertIn("组合总览", response.text)
+        self.assertIn("fundos-index-allocation-trial", response.text)
+        self.assertIn("历史模拟业绩", response.text)
 
     def test_lists_and_gets_product(self) -> None:
         self.app.state.database.create_product(
