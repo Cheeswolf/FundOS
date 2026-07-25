@@ -48,6 +48,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build application image
         uses: docker/build-push-action@v7
         with:
@@ -56,4 +59,3 @@ jobs:
           tags: fundos:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
