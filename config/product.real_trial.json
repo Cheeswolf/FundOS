@@ -48,6 +48,15 @@
       {"symbol": "BOND", "weight": 0.40}
     ]
   },
+  "performance_policy": {
+    "status": "gross_of_investor_transaction_costs",
+    "fund_operating_expenses": "already_reflected_in_published_fund_nav",
+    "subscription_fees": "excluded_pending_distribution_channel_approval",
+    "redemption_fees": "excluded_pending_holding_period_policy",
+    "rebalance_costs": "excluded_pending_fee_schedule",
+    "cash_return": "zero_until_cash_yield_policy_is_approved",
+    "required_disclosure": "历史模拟业绩，基于基金复权净值，未扣申购、赎回及调仓成本，不代表实盘或可实现收益。"
+  },
   "data_policy": {
     "trial_source": "tushare-pro",
     "production_source": "licensed-provider-required",

@@ -10,6 +10,8 @@ from .publication import PublicationResult, publish_portfolio_version
 from .research import create_research_report, finalize_research_report
 from .review import ReviewResult, generate_review_report
 from .versioned_performance import PerformanceResult, calculate_and_store_versioned_performance
+from .trial_series import TrialSeriesResult, build_trial_valuation_series
+from .trial_product import TrialProductResult, initialize_trial_product
 from .workflow import (
     RiskCheck,
     RiskReviewReport,
@@ -37,6 +39,10 @@ __all__ = [
     "PipelineResult",
     "run_production_pipeline",
     "calculate_and_store_versioned_performance",
+    "TrialSeriesResult",
+    "build_trial_valuation_series",
+    "TrialProductResult",
+    "initialize_trial_product",
     "publish_portfolio_version",
     "create_research_report",
     "finalize_research_report",
