@@ -50,8 +50,17 @@ class VersionedPerformanceTests(unittest.TestCase):
                     reason="Test publication",
                     approved_by="test-committee",
                 )
-            dates = [date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)]
-            series = {"A": [100, 110, 110], "B": [100, 100, 120], "BM": [100, 105, 110]}
+            dates = [
+                date(2026, 6, 30),
+                date(2026, 7, 1),
+                date(2026, 7, 2),
+                date(2026, 7, 3),
+            ]
+            series = {
+                "A": [90, 100, 110, 110],
+                "B": [90, 100, 100, 120],
+                "BM": [90, 100, 105, 110],
+            }
             rows = [
                 ("fixture", symbol, nav_date, value)
                 for symbol, values in series.items()

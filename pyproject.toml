@@ -9,6 +9,7 @@ description = "AI investment research and portfolio operating system"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "certifi>=2025.1.31",
     "fastapi>=0.110,<0.120",
     "pydantic>=1.10.13,<2",
     "uvicorn>=0.30,<1",
