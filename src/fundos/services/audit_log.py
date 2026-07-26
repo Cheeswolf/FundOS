@@ -26,10 +26,21 @@ def record_audit_event(database: Database, event: dict[str, Any]) -> str:
     with database.connect() as connection:
         database.begin_idempotent_write(connection, "audit-chain")
         previous = connection.execute(
-            "SELECT event_hash FROM api_audit_events ORDER BY created_at DESC, audit_id DESC LIMIT 1"
+            """
+            SELECT event_hash, created_at
+            FROM api_audit_events
+            ORDER BY created_at DESC, audit_id DESC LIMIT 1
+            """
         ).fetchone()
+        event = dict(event)
         if previous:
             previous_hash = previous["event_hash"]
+            previous_time = datetime.fromisoformat(previous["created_at"])
+            event_time = datetime.fromisoformat(str(event["created_at"]))
+            if event_time <= previous_time:
+                event["created_at"] = (
+                    previous_time + timedelta(microseconds=1)
+                ).isoformat()
         else:
             anchor = connection.execute(
                 "SELECT anchor_hash FROM audit_retention_anchors ORDER BY anchor_id DESC LIMIT 1"
