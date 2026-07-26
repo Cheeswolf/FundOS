@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import sqlite3
+from typing import Any
 
 from fundos.storage import Database
 
@@ -19,7 +19,7 @@ def publish_portfolio_version(
     version_id: str,
     reason: str,
     approved_by: str,
-    connection: sqlite3.Connection | None = None,
+    connection: Any | None = None,
 ) -> PublicationResult:
     if not reason.strip() or not approved_by.strip():
         raise ValueError("publication reason and approver are required")

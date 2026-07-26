@@ -1,6 +1,7 @@
 """SQLite persistence for FundOS."""
 
 from .database import Database
+from .postgres import PostgresDatabase
 from .backup import (
     BackupVerification,
     create_database_backup,
@@ -9,6 +10,6 @@ from .backup import (
 )
 
 __all__ = [
-    "Database", "BackupVerification", "create_database_backup",
+    "Database", "PostgresDatabase", "BackupVerification", "create_database_backup",
     "restore_database_backup", "verify_database_backup",
 ]

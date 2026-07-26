@@ -1,7 +1,6 @@
 import os
 import csv
 import io
-import sqlite3
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -64,6 +63,10 @@ from fundos.services import (
     verify_audit_chain,
 )
 from fundos.storage import Database
+from fundos.storage.errors import INTEGRITY_ERRORS
+
+
+DOMAIN_WRITE_ERRORS = (ValueError, *INTEGRITY_ERRORS)
 
 
 PAGINATED_RESPONSE_DOCS = {
@@ -110,7 +113,7 @@ def get_database(request: Request) -> Database:
 
 
 def _domain_error(error: Exception) -> HTTPException:
-    if isinstance(error, sqlite3.IntegrityError):
+    if isinstance(error, INTEGRITY_ERRORS):
         return HTTPException(
             status_code=409,
             detail=str(error),
@@ -150,7 +153,7 @@ def _idempotent(
     ).hexdigest()
     try:
         with database.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            database.begin_idempotent_write(connection, key)
             existing = connection.execute(
                 "SELECT * FROM idempotency_records WHERE idempotency_key = ?",
                 (key,),
@@ -171,7 +174,7 @@ def _idempotent(
                 """,
                 (key, operation, request_hash, json.dumps(result, ensure_ascii=False)),
             )
-    except sqlite3.IntegrityError as error:
+    except INTEGRITY_ERRORS as error:
         raise HTTPException(status_code=409, detail="concurrent idempotent request conflict") from error
     return result
 
@@ -416,7 +419,7 @@ def create_app(
             raise HTTPException(status_code=422, detail="at least one asset is required")
         try:
             db.upsert_assets(Asset(item.symbol, item.name, item.asset_class) for item in payload)
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"upserted": len(payload)}
 
@@ -448,7 +451,7 @@ def create_app(
                     or {"product_id": payload.product_id}
                 ),
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
 
     @app.post("/market-prices", status_code=201, tags=["market-data"], dependencies=[Depends(require_operator)])
@@ -457,7 +460,7 @@ def create_app(
             count = db.upsert_prices(
                 (payload.provider, item.symbol, item.trade_date, item.close) for item in payload.prices
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"upserted": count}
 
@@ -485,7 +488,7 @@ def create_app(
             create_research_report(db, report)
             if payload.finalize:
                 finalize_research_report(db, report_id=payload.report_id)
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"report_id": payload.report_id, "status": "final" if payload.finalize else "draft"}
 
@@ -500,7 +503,7 @@ def create_app(
     ) -> dict[str, str]:
         try:
             finalize_research_report(db, report_id=report_id)
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"report_id": report_id, "status": "final"}
 
@@ -519,7 +522,7 @@ def create_app(
                 research_report_id=payload.research_report_id,
                 run_id=payload.run_id,
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"run_id": run_id, "state": "proposed"}
 
@@ -532,7 +535,7 @@ def create_app(
                 db, run_id=run_id, provider=payload.provider,
                 as_of_date=payload.as_of_date, stress_scenarios=payload.stress_scenarios,
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {
             "run_id": report.run_id,
@@ -551,7 +554,7 @@ def create_app(
                 rationale=payload.rationale, decided_by=payload.decided_by,
                 minimum_opinions=payload.minimum_opinions,
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"run_id": run_id, "decision": decision}
 
@@ -580,7 +583,7 @@ def create_app(
                 conditions=payload.conditions,
                 submitted_by=payload.submitted_by,
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
         return {"opinion_id": opinion_id, "run_id": run_id}
 
@@ -590,7 +593,7 @@ def create_app(
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         db: Database = Depends(get_database),
     ) -> dict[str, Any]:
-        def action(connection: sqlite3.Connection | None) -> dict[str, Any]:
+        def action(connection: Any | None) -> dict[str, Any]:
             result = publish_approved_workflow(
                 db,
                 run_id=run_id,
@@ -612,7 +615,7 @@ def create_app(
                 payload={"run_id": run_id},
                 action=action,
             )
-        except (ValueError, sqlite3.IntegrityError) as error:
+        except DOMAIN_WRITE_ERRORS as error:
             raise _domain_error(error) from error
 
     @app.get("/products/{product_id}", tags=["portfolios"])

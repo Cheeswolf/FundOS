@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 import json
-import sqlite3
-from typing import Mapping
+from typing import Any, Mapping
 from uuid import uuid4
 
 from fundos.domain import PortfolioVersion
@@ -316,7 +315,7 @@ def publish_approved_workflow(
     database: Database,
     *,
     run_id: str,
-    connection: sqlite3.Connection | None = None,
+    connection: Any | None = None,
 ) -> PublicationResult:
     if connection is None:
         with database.connect() as owned_connection:

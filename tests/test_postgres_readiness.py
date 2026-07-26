@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from fundos.storage.postgres import check_postgres_readiness  # noqa: E402
+from fundos.storage.postgres import (  # noqa: E402
+    PostgresConnectionAdapter,
+    PostgresDatabase,
+    check_postgres_readiness,
+)
 
 
 class FakeCursor:
@@ -72,6 +76,78 @@ class PostgresReadinessTests(unittest.TestCase):
                 "sqlite:///data/fundos.sqlite3",
                 connector=lambda _: None,
             )
+
+    def test_connection_adapter_translates_queries_and_transactions(self) -> None:
+        class RawConnection:
+            def __init__(self):
+                self.calls = []
+                self.committed = False
+                self.closed = False
+
+            def execute(self, query, parameters):
+                self.calls.append((query, parameters))
+                return self
+
+            def fetchall(self):
+                return [{"product_id": "P1"}]
+
+            def commit(self):
+                self.committed = True
+
+            def rollback(self):
+                raise AssertionError("rollback was not expected")
+
+            def close(self):
+                self.closed = True
+
+        raw = RawConnection()
+        database = PostgresDatabase(
+            "postgresql://localhost/fundos",
+            connector=lambda *_args, **_kwargs: raw,
+        )
+
+        rows = database.fetch_all(
+            "SELECT * FROM portfolio_products WHERE product_id = ?",
+            ("P1",),
+        )
+
+        self.assertEqual(rows, [{"product_id": "P1"}])
+        self.assertEqual(
+            raw.calls,
+            [
+                (
+                    "SELECT * FROM portfolio_products WHERE product_id = %s",
+                    ("P1",),
+                )
+            ],
+        )
+        self.assertTrue(raw.committed)
+        self.assertTrue(raw.closed)
+
+    def test_postgres_schema_initialization_is_explicitly_blocked(self) -> None:
+        database = PostgresDatabase("postgresql://localhost/fundos")
+
+        with self.assertRaisesRegex(RuntimeError, "schema migrations"):
+            database.initialize()
+
+    def test_adapter_translates_batch_queries(self) -> None:
+        class RawConnection:
+            def executemany(self, query, parameters):
+                self.call = (query, parameters)
+                return "ok"
+
+        raw = RawConnection()
+
+        result = PostgresConnectionAdapter(raw).executemany(
+            "INSERT INTO assets VALUES (?, ?)",
+            [("A", "Asset")],
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(
+            raw.call,
+            ("INSERT INTO assets VALUES (%s, %s)", [("A", "Asset")]),
+        )
 
 
 if __name__ == "__main__":

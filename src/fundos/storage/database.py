@@ -8,6 +8,7 @@ from typing import Any
 
 from fundos.domain.models import Asset, InvestmentMandate, PortfolioProduct, PortfolioVersion, PositionWeight
 from fundos.analytics.time_series import DatedNav, DatedPrice
+from fundos.storage.dialects import SQLiteDialect
 from fundos.storage.migrations import apply_migrations
 
 
@@ -396,6 +397,7 @@ CREATE TABLE IF NOT EXISTS audit_retention_anchors (
 class Database:
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
+        self.dialect = SQLiteDialect()
 
     @contextmanager
     def connect(self):
@@ -414,6 +416,13 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             apply_migrations(connection, SCHEMA)
+
+    def begin_idempotent_write(
+        self,
+        connection: sqlite3.Connection,
+        key: str,
+    ) -> None:
+        self.dialect.begin_idempotent_write(connection, key)
 
     def get_schema_version(self) -> int:
         rows = self.fetch_all("SELECT MAX(version) AS version FROM schema_migrations")

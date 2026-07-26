@@ -1,5 +1,9 @@
 from dataclasses import asdict, dataclass
+from contextlib import contextmanager
 from typing import Any, Callable
+
+from fundos.storage.database import Database
+from fundos.storage.dialects import PostgresDialect
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,3 +79,85 @@ def check_postgres_readiness(
         can_use_public_schema=bool(row[6]),
         can_create_in_public_schema=bool(row[7]),
     )
+
+
+class PostgresConnectionAdapter:
+    """Expose the subset of DB-API used by FundOS with qmark SQL compatibility."""
+
+    def __init__(self, connection: Any) -> None:
+        self.raw_connection = connection
+        self.dialect = PostgresDialect()
+
+    def execute(
+        self,
+        query: str,
+        parameters: tuple[Any, ...] = (),
+    ) -> Any:
+        return self.raw_connection.execute(
+            self.dialect.prepare(query),
+            parameters,
+        )
+
+    def executemany(
+        self,
+        query: str,
+        parameters: list[tuple[Any, ...]],
+    ) -> Any:
+        return self.raw_connection.executemany(
+            self.dialect.prepare(query),
+            parameters,
+        )
+
+
+class PostgresDatabase(Database):
+    """PostgreSQL connection adapter; schema initialization is added next."""
+
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        connector: Callable[..., Any] | None = None,
+    ) -> None:
+        if not database_url.startswith(("postgresql://", "postgres://")):
+            raise ValueError("database URL must use postgresql:// or postgres://")
+        self.path = database_url
+        self.dialect = PostgresDialect()
+        self._connector = connector
+
+    @contextmanager
+    def connect(self):
+        connector = self._connector
+        connect_options: dict[str, Any] = {}
+        if connector is None:
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+            except ImportError as error:
+                raise RuntimeError(
+                    'PostgreSQL support requires: python -m pip install -e ".[postgres]"'
+                ) from error
+            connector = psycopg.connect
+            connect_options["row_factory"] = dict_row
+        raw_connection = connector(self.path, **connect_options)
+        connection = PostgresConnectionAdapter(raw_connection)
+        try:
+            yield connection
+            raw_connection.commit()
+        except Exception:
+            raw_connection.rollback()
+            raise
+        finally:
+            raw_connection.close()
+
+    def initialize(self) -> None:
+        raise RuntimeError(
+            "PostgreSQL schema migrations are not installed yet; "
+            "run only the readiness check at this stage"
+        )
+
+    def begin_idempotent_write(
+        self,
+        connection: PostgresConnectionAdapter,
+        key: str,
+    ) -> None:
+        self.dialect.begin_idempotent_write(connection, key)
