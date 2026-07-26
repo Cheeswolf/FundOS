@@ -1,6 +1,8 @@
 import os
 import sys
+import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from fundos.api import create_app  # noqa: E402
+from fundos.domain import Asset, PortfolioProduct  # noqa: E402
+from fundos.storage import Database  # noqa: E402
+from fundos.storage.data_migration import migrate_sqlite_to_postgres  # noqa: E402
 
 
 POSTGRES_URL = os.environ.get("FUNDOS_TEST_POSTGRES_URL", "").strip()
@@ -28,6 +33,35 @@ class PostgresApiIntegrationTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.client.close()
+
+    def test_00_migrates_sqlite_data_and_verifies_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Database(Path(directory) / "source.sqlite3")
+            source.initialize()
+            source.upsert_assets([Asset("MIGCASH", "Migration Cash", "cash")])
+            source.create_product(
+                PortfolioProduct(
+                    "migrated-product",
+                    "Migrated Product",
+                    "MIGCASH",
+                    datetime(2026, 7, 26),
+                )
+            )
+
+            report = migrate_sqlite_to_postgres(
+                source,
+                self.app.state.database,
+            )
+
+        self.assertEqual(report.source_schema_version, 14)
+        self.assertEqual(report.target_schema_version, 14)
+        self.assertGreater(report.total_rows, 0)
+        migrated = self.client.get("/products/migrated-product")
+        self.assertEqual(migrated.status_code, 200, migrated.text)
+        self.assertEqual(
+            migrated.json()["product"]["name"],
+            "Migrated Product",
+        )
 
     def test_health_and_idempotent_product_write(self) -> None:
         suffix = uuid4().hex[:12]

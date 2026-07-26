@@ -32,6 +32,9 @@
 - [ ] `python scripts/check_postgres.py` 返回 `ready: true`；
 - [ ] `python scripts/initialize_postgres.py` 完成且 schema version 为 14；
 - [ ] CI `postgres-integration` 作业通过；
+- [ ] SQLite 已备份，API 与调度写入已停止；
+- [ ] 搬迁报告中所有表的数量和 SHA-256 摘要验证通过；
+- [ ] PostgreSQL identity 序列已校正；
 - [ ] `FUNDOS_DATABASE_URL` 仅在数据搬迁和回退演练完成后切换；
 - [ ] 生产连接启用 TLS；
 - [ ] 数据迁移、核对、切换和回退演练全部完成后才允许多实例运行。

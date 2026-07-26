@@ -13,7 +13,8 @@ FundOS 当前运行时仍使用 SQLite。仓库已经具备 PostgreSQL 16 本地
    14 事务执行并写入 `schema_migrations`；后续结构变化继续追加迁移；
 4. **API 连接与基础验收（已完成）**：`FUNDOS_DATABASE_URL` 选择数据库；CI 在
    PostgreSQL 16 上验证建表、API 写入、原子幂等和读取；
-5. **数据搬迁**：停写后导出 SQLite，按外键顺序导入 PostgreSQL并核对数量和摘要；
+5. **数据搬迁（工具已完成，待实际执行）**：停写后锁定 SQLite，按外键顺序在单一
+   事务中导入空 PostgreSQL，校正 identity 序列，并逐表核对数量和 SHA-256 摘要；
 6. **完整双环境验收**：在 SQLite 和 PostgreSQL 分别运行领域、API、调度和并发测试；
 7. **切换与回退**：备份、停写、最终增量导入、切换连接、冒烟检查；失败则切回
    SQLite 只读副本。
@@ -55,9 +56,26 @@ SQLite；配置 `postgresql://...` 时使用 PostgreSQL。`FUNDOS_POSTGRES_URL` 
 搬迁和完整双环境验收。
 
 CI 的 `postgres-integration` 作业会启动临时 PostgreSQL 16，并运行最小 API
-集成测试。本地可使用：
+集成测试以及 SQLite 搬迁验收。本地可使用：
 
 ```powershell
 $env:FUNDOS_TEST_POSTGRES_URL = $env:FUNDOS_POSTGRES_URL
 python -m unittest tests.test_postgres_integration -v
 ```
+
+## 搬迁现有 SQLite 数据
+
+搬迁工具只接受空目标业务表，不提供覆盖或合并选项。执行前应先备份 SQLite、停止
+API 和调度写入，并保留原数据库用于回退：
+
+```powershell
+python scripts/backup_database.py
+python scripts/check_postgres.py
+python scripts/initialize_postgres.py
+python scripts/migrate_sqlite_to_postgres.py --confirm-writes-stopped
+```
+
+工具在复制期间持有 SQLite 写锁，按外键依赖顺序导入，并在 PostgreSQL 单一事务内
+完成。每张表都会比较行数和与顺序无关的 SHA-256 内容摘要；任何失败都会回滚整个
+目标导入。浮点列使用 `DOUBLE PRECISION`，避免 SQLite 双精度数据降为 PostgreSQL
+单精度。
