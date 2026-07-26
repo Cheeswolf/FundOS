@@ -1,10 +1,13 @@
 import sys
+import re
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from fundos.storage.database import SCHEMA  # noqa: E402
+from fundos.storage import Database  # noqa: E402
 from fundos.storage.postgres_migrations import (  # noqa: E402
     POSTGRES_BASELINE_VERSION,
     apply_postgres_migrations,
@@ -73,6 +76,20 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertEqual(migrations[1].version, 15)
         self.assertTrue(migrations[1].reversible)
         self.assertEqual(len(migrations[1].checksum), 64)
+
+    def test_postgres_baseline_contains_every_sqlite_business_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "inventory.sqlite3")
+            database.initialize()
+            sqlite_tables = set(database.list_tables())
+        baseline_sql = "\n".join(postgres_migrations(SCHEMA)[0].statements)
+        postgres_tables = set(re.findall(
+            r"CREATE TABLE IF NOT EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)",
+            baseline_sql,
+            flags=re.IGNORECASE,
+        ))
+
+        self.assertEqual(postgres_tables, sqlite_tables)
 
     def test_applies_baseline_idempotently(self) -> None:
         connection = MigrationConnection()
