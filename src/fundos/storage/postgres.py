@@ -103,10 +103,12 @@ class PostgresConnectionAdapter:
         query: str,
         parameters: list[tuple[Any, ...]],
     ) -> Any:
-        return self.raw_connection.executemany(
-            self.dialect.prepare(query),
-            parameters,
-        )
+        with self.raw_connection.cursor() as cursor:
+            cursor.executemany(
+                self.dialect.prepare(query),
+                parameters,
+            )
+        return None
 
 
 class PostgresDatabase(Database):

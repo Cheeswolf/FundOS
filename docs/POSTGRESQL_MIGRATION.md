@@ -11,9 +11,11 @@ FundOS 当前运行时仍使用 SQLite。仓库已经具备 PostgreSQL 16 本地
    元数据查询、identity 主键返回和幂等事务锁均已抽象；
 3. **正式迁移基线（已完成）**：当前完整结构转换为 PostgreSQL DDL，按逻辑版本
    14 事务执行并写入 `schema_migrations`；后续结构变化继续追加迁移；
-4. **数据搬迁**：停写后导出 SQLite，按外键顺序导入 PostgreSQL并核对数量和摘要；
-5. **双环境验收**：在 SQLite 和 PostgreSQL 分别运行领域、API、调度和并发测试；
-6. **切换与回退**：备份、停写、最终增量导入、切换连接、冒烟检查；失败则切回
+4. **API 连接与基础验收（已完成）**：`FUNDOS_DATABASE_URL` 选择数据库；CI 在
+   PostgreSQL 16 上验证建表、API 写入、原子幂等和读取；
+5. **数据搬迁**：停写后导出 SQLite，按外键顺序导入 PostgreSQL并核对数量和摘要；
+6. **完整双环境验收**：在 SQLite 和 PostgreSQL 分别运行领域、API、调度和并发测试；
+7. **切换与回退**：备份、停写、最终增量导入、切换连接、冒烟检查；失败则切回
    SQLite 只读副本。
 
 ## 启动预检数据库
@@ -47,5 +49,15 @@ python scripts/initialize_postgres.py
 取得事务级 advisory lock。`initialize()` 会在一个事务中幂等应用 PostgreSQL
 schema 基线；执行失败时不会留下部分建表结果。
 
-这仍不代表 API 可以切换到 PostgreSQL：尚未把 API 启动配置接到
-`FUNDOS_POSTGRES_URL`，也尚未执行真实 PostgreSQL 上的双数据库 API 验收。
+API 现在读取 `FUNDOS_DATABASE_URL`。留空时继续使用 `FUNDOS_DB_PATH` 指向的
+SQLite；配置 `postgresql://...` 时使用 PostgreSQL。`FUNDOS_POSTGRES_URL` 仍只供
+预检和初始化脚本使用。基础 API 验收不等于迁移完成；首次生产切换前必须完成数据
+搬迁和完整双环境验收。
+
+CI 的 `postgres-integration` 作业会启动临时 PostgreSQL 16，并运行最小 API
+集成测试。本地可使用：
+
+```powershell
+$env:FUNDOS_TEST_POSTGRES_URL = $env:FUNDOS_POSTGRES_URL
+python -m unittest tests.test_postgres_integration -v
+```

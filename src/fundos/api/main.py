@@ -62,7 +62,7 @@ from fundos.services import (
     review_raw_research_evidence,
     verify_audit_chain,
 )
-from fundos.storage import Database
+from fundos.storage import Database, database_from_url
 from fundos.storage.errors import INTEGRITY_ERRORS
 
 
@@ -182,12 +182,27 @@ def _idempotent(
 def create_app(
     database_path: str | Path | None = None,
     *,
+    database_url: str | None = None,
     api_key: str | None = None,
     api_keys: dict[str, str] | None = None,
 ) -> FastAPI:
-    resolved_path = Path(database_path or os.environ.get("FUNDOS_DB_PATH", "data/fundos.sqlite3"))
-    resolved_path.parent.mkdir(parents=True, exist_ok=True)
-    database = Database(resolved_path)
+    if database_path is not None and database_url is not None:
+        raise ValueError("database_path and database_url cannot both be configured")
+    configured_url = database_url or (
+        os.environ.get("FUNDOS_DATABASE_URL", "").strip()
+        if database_path is None else ""
+    )
+    if configured_url:
+        database = database_from_url(configured_url)
+        if isinstance(database, Database) and database.dialect.name == "sqlite":
+            Path(database.path).parent.mkdir(parents=True, exist_ok=True)
+    else:
+        resolved_path = Path(
+            database_path
+            or os.environ.get("FUNDOS_DB_PATH", "data/fundos.sqlite3")
+        )
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        database = Database(resolved_path)
     database.initialize()
 
     app = FastAPI(

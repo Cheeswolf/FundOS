@@ -125,10 +125,22 @@ class PostgresReadinessTests(unittest.TestCase):
         self.assertTrue(raw.closed)
 
     def test_adapter_translates_batch_queries(self) -> None:
-        class RawConnection:
+        class BatchCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
             def executemany(self, query, parameters):
                 self.call = (query, parameters)
-                return "ok"
+
+        class RawConnection:
+            def __init__(self):
+                self.batch_cursor = BatchCursor()
+
+            def cursor(self):
+                return self.batch_cursor
 
         raw = RawConnection()
 
@@ -137,9 +149,9 @@ class PostgresReadinessTests(unittest.TestCase):
             [("A", "Asset")],
         )
 
-        self.assertEqual(result, "ok")
+        self.assertIsNone(result)
         self.assertEqual(
-            raw.call,
+            raw.batch_cursor.call,
             ("INSERT INTO assets VALUES (%s, %s)", [("A", "Asset")]),
         )
 
