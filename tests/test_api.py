@@ -1,13 +1,14 @@
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from fundos.analytics import DatedNav  # noqa: E402
 from fundos.api import create_app  # noqa: E402
 from fundos.domain import Asset, PortfolioProduct  # noqa: E402
 from fundos.services import (  # noqa: E402
@@ -129,6 +130,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("/committee-opinions", response.text)
         self.assertIn("minimum_opinions:2", response.text)
         self.assertIn("Idempotency-Key", response.text)
+        self.assertIn("组合与基准净值", response.text)
+        self.assertIn("perf.benchmark_nav", response.text)
 
     def test_lists_and_gets_product(self) -> None:
         self.app.state.database.create_product(
@@ -140,6 +143,47 @@ class ApiTests(unittest.TestCase):
         detail = self.client.get("/products/P1")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["product"]["name"], "Test Portfolio")
+
+    def test_performance_returns_portfolio_and_benchmark_curves(self) -> None:
+        self.app.state.database.create_product(
+            PortfolioProduct("P1", "Test Portfolio", "BM", datetime.now())
+        )
+        self.app.state.database.upsert_portfolio_nav(
+            "P1",
+            [
+                DatedNav(date(2026, 7, 1), 1.0),
+                DatedNav(date(2026, 7, 2), 1.1),
+            ],
+        )
+        self.app.state.database.upsert_benchmark_nav(
+            "P1",
+            "BM",
+            [
+                DatedNav(date(2026, 7, 1), 1.0),
+                DatedNav(date(2026, 7, 2), 1.05),
+            ],
+        )
+
+        response = self.client.get("/products/P1/performance")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["nav"][-1]["nav"], 1.1)
+        self.assertEqual(
+            payload["benchmark_nav"],
+            [
+                {
+                    "benchmark_symbol": "BM",
+                    "nav_date": "2026-07-01",
+                    "nav": 1.0,
+                },
+                {
+                    "benchmark_symbol": "BM",
+                    "nav_date": "2026-07-02",
+                    "nav": 1.05,
+                },
+            ],
+        )
 
     def test_missing_resources_return_404(self) -> None:
         self.assertEqual(self.client.get("/products/missing").status_code, 404)

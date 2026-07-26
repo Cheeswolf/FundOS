@@ -26,7 +26,7 @@ class BackupTests(unittest.TestCase):
         backup, manifest = create_database_backup(self.source_path, self.root / "backups")
         verification = verify_database_backup(backup, manifest)
         self.assertTrue(verification.valid)
-        self.assertEqual(verification.schema_version, 13)
+        self.assertEqual(verification.schema_version, 14)
         self.assertEqual(verification.table_counts["portfolio_products"], 1)
 
         restored = self.root / "restored.sqlite3"

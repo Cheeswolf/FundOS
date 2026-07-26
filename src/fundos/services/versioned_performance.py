@@ -65,6 +65,7 @@ def calculate_and_store_versioned_performance(
     )
     benchmark_return = benchmark_nav[-1].nav / benchmark_nav[0].nav - 1
     database.upsert_portfolio_nav(product_id, portfolio_nav)
+    database.upsert_benchmark_nav(product_id, benchmark_symbol, benchmark_nav)
     database.upsert_performance_snapshot(
         product_id,
         dates[-1],

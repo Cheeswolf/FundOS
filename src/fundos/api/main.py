@@ -633,11 +633,25 @@ def create_app(
             (product_id, limit),
         ))
         nav.reverse()
+        benchmark_nav = _rows(db.fetch_all(
+            """
+            SELECT benchmark_symbol, nav_date, nav
+            FROM benchmark_nav
+            WHERE product_id = ?
+            ORDER BY nav_date DESC LIMIT ?
+            """,
+            (product_id, limit),
+        ))
+        benchmark_nav.reverse()
         snapshots = _rows(db.fetch_all(
             "SELECT * FROM performance_snapshots WHERE product_id = ? ORDER BY as_of_date DESC",
             (product_id,),
         ))
-        return {"nav": nav, "snapshots": snapshots}
+        return {
+            "nav": nav,
+            "benchmark_nav": benchmark_nav,
+            "snapshots": snapshots,
+        }
 
     @app.get(
         "/products/{product_id}/operations",

@@ -88,6 +88,14 @@ CREATE TABLE IF NOT EXISTS portfolio_nav (
     PRIMARY KEY (product_id, nav_date)
 );
 
+CREATE TABLE IF NOT EXISTS benchmark_nav (
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    benchmark_symbol TEXT NOT NULL,
+    nav_date TEXT NOT NULL,
+    nav REAL NOT NULL CHECK (nav > 0),
+    PRIMARY KEY (product_id, nav_date)
+);
+
 CREATE TABLE IF NOT EXISTS performance_snapshots (
     product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
     as_of_date TEXT NOT NULL,
@@ -533,6 +541,30 @@ class Database:
                 INSERT INTO portfolio_nav (product_id, nav_date, nav)
                 VALUES (?, ?, ?)
                 ON CONFLICT(product_id, nav_date) DO UPDATE SET nav = excluded.nav
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def upsert_benchmark_nav(
+        self,
+        product_id: str,
+        benchmark_symbol: str,
+        values: Iterable[DatedNav],
+    ) -> int:
+        rows = [
+            (product_id, benchmark_symbol, item.nav_date.isoformat(), item.nav)
+            for item in values
+        ]
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO benchmark_nav (
+                    product_id, benchmark_symbol, nav_date, nav
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(product_id, nav_date) DO UPDATE SET
+                    benchmark_symbol = excluded.benchmark_symbol,
+                    nav = excluded.nav
                 """,
                 rows,
             )

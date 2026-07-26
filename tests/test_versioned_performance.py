@@ -119,6 +119,12 @@ class VersionedPerformanceTests(unittest.TestCase):
             self.assertAlmostEqual(result.benchmark_nav, 1.10)
             self.assertAlmostEqual(result.excess_return, 0.22)
             self.assertEqual(len(database.fetch_all("SELECT * FROM portfolio_nav")), 3)
+            benchmark_rows = database.fetch_all(
+                "SELECT * FROM benchmark_nav ORDER BY nav_date"
+            )
+            self.assertEqual(len(benchmark_rows), 3)
+            self.assertEqual(benchmark_rows[0]["benchmark_symbol"], "BM")
+            self.assertAlmostEqual(benchmark_rows[-1]["nav"], 1.10)
             snapshots = database.fetch_all("SELECT * FROM performance_snapshots")
             self.assertEqual(len(snapshots), 1)
             self.assertAlmostEqual(snapshots[0]["excess_return"], 0.22)

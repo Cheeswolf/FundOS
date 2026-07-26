@@ -277,6 +277,19 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_benchmark_nav(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS benchmark_nav (
+                product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+                benchmark_symbol TEXT NOT NULL,
+                nav_date TEXT NOT NULL,
+                nav REAL NOT NULL CHECK (nav > 0),
+                PRIMARY KEY (product_id, nav_date)
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -291,6 +304,7 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(11, "add_evidence_collection_runs", add_evidence_collection_runs),
         Migration(12, "add_scheduled_job_control", add_scheduled_job_control),
         Migration(13, "add_committee_opinions", add_committee_opinions),
+        Migration(14, "add_benchmark_nav", add_benchmark_nav),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:
