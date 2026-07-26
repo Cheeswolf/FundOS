@@ -16,7 +16,7 @@ FundOS 是一个面向标准化投资组合的投研、风控、审批、发布�
 | API 与界面 | 已完成 | 真实试用产品仪表盘、产品切换、历史模拟披露和 AI 运营指标 |
 | 安全与审计 | 已完成基础版本 | operator/admin 权限、操作审计、哈希链、导出和保留策略 |
 | 灾难恢复 | 已完成 | 在线备份、清单校验、受控恢复和非破坏性恢复演练 |
-| 自动化验证 | 已完成 | 145 项自动化测试、Python 编译检查和 GitHub Actions 配置 |
+| 自动化验证 | 已完成 | 150 项测试、82% 分支覆盖率、20 年历史性能基准和 GitHub Actions |
 
 当前成熟度估计：
 
@@ -160,6 +160,7 @@ GitHub Actions 会在 `main` 分支推送及 Pull Request 上自动执行完整�
 - [生产部署检查清单](docs/DEPLOYMENT_CHECKLIST.md)
 - [项目整体审计](docs/PROJECT_AUDIT.md)
 - [DeepSeek Agent 与可信证据操作手册](docs/AGENT_RESEARCH.md)
+- [测试覆盖率与性能基线](docs/QUALITY.md)
 
 ## AI 研究草稿
 
