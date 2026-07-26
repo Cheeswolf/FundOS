@@ -103,6 +103,24 @@ python scripts/sync_market_data.py --compact
 
 ## 5. 运营节奏
 
+### 部署预检
+
+任何生产启动或 PostgreSQL 切换前，都应使用最新且已验证的备份清单执行门禁：
+
+```powershell
+python scripts/deployment_preflight.py `
+  --mode production `
+  --backup-manifest backups\<latest>.manifest.json
+```
+
+切换窗口使用 `--mode cutover`，此时 `FUNDOS_READ_ONLY` 必须为 `true`。报告中的
+`ready` 只有在全部阻断项通过时才为真；告警 Webhook 和 OpenTelemetry 缺失目前记为
+警告。报告不会输出 API Key 或数据库密码。
+
+SQLite 备份只可作为 SQLite 正式运行或 PostgreSQL 切换窗口的回退证据，不能证明
+已开放写入的 PostgreSQL 具备可恢复备份。PostgreSQL 正式生产预检会因此阻断，直到
+配置并验证 PostgreSQL 原生备份。
+
 ### 每日
 
 1. 同步行情；

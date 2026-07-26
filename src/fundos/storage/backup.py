@@ -70,6 +70,7 @@ def create_database_backup(
     manifest_path = backup_path.with_suffix(".manifest.json")
     manifest = {
         "format_version": 1,
+        "backend": "sqlite",
         "backup_file": backup_path.name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sha256": _sha256(backup_path),
