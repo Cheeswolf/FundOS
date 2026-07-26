@@ -48,6 +48,8 @@ class TrialSeriesTests(unittest.TestCase):
             first = build_trial_valuation_series(database, **arguments)
             second = build_trial_valuation_series(database, **arguments)
             self.assertEqual(first, second)
+            self.assertEqual(first.valuation_dates, 3)
+            self.assertEqual(first.carried_values, 0)
 
             cash = database.get_prices("trial", ["CASH"])
             self.assertEqual([row.close for row in cash], [1.0, 1.0, 1.0])
@@ -77,6 +79,43 @@ class TrialSeriesTests(unittest.TestCase):
                     benchmark_symbol="BM",
                     benchmark_weights={"A": 1.0},
                 )
+
+    def test_normalizes_asynchronous_fund_nav_dates_without_future_fill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory) / "test.sqlite3")
+            database.initialize()
+            database.upsert_assets([
+                Asset("A", "A", "equity"),
+                Asset("B", "B", "equity"),
+            ])
+            database.upsert_prices([
+                ("source", "A", date(2026, 7, 1), 100),
+                ("source", "A", date(2026, 7, 2), 110),
+                ("source", "A", date(2026, 7, 3), 121),
+                ("source", "B", date(2026, 7, 1), 200),
+                ("source", "B", date(2026, 7, 3), 220),
+            ])
+            result = build_trial_valuation_series(
+                database,
+                source_provider="source",
+                target_provider="trial",
+                fund_symbols=["A", "B"],
+                cash_symbol="CASH",
+                benchmark_symbol="BM",
+                benchmark_weights={"A": 0.5, "B": 0.5},
+                maximum_carry_days=2,
+            )
+            b_prices = database.get_prices("trial", ["B"])
+            self.assertEqual(
+                [(item.trade_date, item.close) for item in b_prices],
+                [
+                    (date(2026, 7, 1), 200),
+                    (date(2026, 7, 2), 200),
+                    (date(2026, 7, 3), 220),
+                ],
+            )
+            self.assertEqual(result.carried_values, 1)
+            self.assertEqual(result.maximum_age_days, 1)
 
 
 if __name__ == "__main__":

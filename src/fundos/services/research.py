@@ -43,12 +43,14 @@ def create_research_report(database: Database, report: ResearchReport) -> str:
                 INSERT INTO asset_views
                     (report_id, asset_symbol, direction, confidence, thesis)
                 VALUES (?, ?, ?, ?, ?)
+                RETURNING view_id
                 """,
                 (report.report_id, view.asset_symbol, view.direction, float(view.confidence), view.thesis),
             )
+            view_id = cursor.fetchone()["view_id"]
             connection.executemany(
                 "INSERT INTO asset_view_evidence (view_id, evidence_id) VALUES (?, ?)",
-                [(cursor.lastrowid, evidence_id) for evidence_id in view.evidence_ids],
+                [(view_id, evidence_id) for evidence_id in view.evidence_ids],
             )
     return report.report_id
 

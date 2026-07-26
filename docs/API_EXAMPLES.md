@@ -142,15 +142,32 @@ Invoke-RestMethod "$baseUrl/workflows/workflow-2026w30/risk-review" `
 ## 8. 投委会决定
 
 ```powershell
+$opinion = @{
+  member_role = "risk"
+  recommendation = "approve"
+  rationale = "硬性风险规则全部通过。"
+  alternative_weights = @()
+  conditions = "若组合波动率显著上升则重新审查。"
+  submitted_by = "risk-officer"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod "$baseUrl/workflows/workflow-2026w30/committee-opinions" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $opinion
+
 $body = @{
   approved = $true
-  rationale = "全部硬性风险规则通过，同意发布。"
-  decided_by = "investment-committee"
+  rationale = "已审阅研究和风险委员意见，同意发布。"
+  decided_by = "committee-chair"
+  minimum_opinions = 2
 } | ConvertTo-Json
 
 Invoke-RestMethod "$baseUrl/workflows/workflow-2026w30/committee-decision" `
   -Method Post -Headers $headers -ContentType "application/json" -Body $body
 ```
+
+每个 `member_role` 对同一工作流只能提交一次不可变意见。意见可以是
+`approve`、`reject` 或 `abstain`，并可附带覆盖全部提案资产且合计为 100%
+的备选权重。最终决策与委员意见分开保存，主席需要在最终依据中说明如何处理分歧。
 
 ## 9. 发布组合
 
@@ -171,8 +188,27 @@ Invoke-RestMethod "$baseUrl/products/balanced-product/research"
 Invoke-RestMethod "$baseUrl/products/balanced-product/workflows"
 Invoke-RestMethod "$baseUrl/products/balanced-product/reviews"
 Invoke-RestMethod "$baseUrl/pipeline-runs"
+Invoke-RestMethod "$baseUrl/scheduled-jobs/runs?job_name=daily-production-pipeline&limit=20"
+Invoke-RestMethod "$baseUrl/scheduled-jobs/locks"
 Invoke-RestMethod "$baseUrl/alerts?status=failed"
 ```
+
+研究报告以草稿创建时，可由 operator 定稿：
+
+```powershell
+Invoke-RestMethod "$baseUrl/research/research-2026w30/finalize" `
+  -Method Post -Headers $headers
+```
+
+仪表盘“决策操作”页提供同一受控流程的操作入口。API Key 仅保存在页面内存，
+通过 `X-API-Key` 请求头发送；刷新页面后清空。研究定稿、创建提案和风险审查
+需要 operator 权限，投委会决策和发布需要 admin 权限。发布动作仍使用
+`Idempotency-Key` 防止重复提交。产品创建或组合发布的业务变更与幂等响应在同一
+数据库事务内提交；并发使用相同键和相同请求会获得同一响应，复用相同键提交不同
+请求则返回 `409`。
+
+计划任务状态包括 `running`、`succeeded`、`failed`、`skipped` 和
+`abandoned`。活动租约响应包含 `active` 布尔值，但不暴露内部 owner ID。
 
 ## 11. 常见响应状态
 
@@ -185,3 +221,42 @@ Invoke-RestMethod "$baseUrl/alerts?status=failed"
 | `409` | 唯一约束或幂等键冲突 |
 | `422` | 输入或领域规则不合法 |
 
+## 12. 分页与错误契约
+
+主要运行记录接口支持 `limit` 和 `offset`，响应正文继续保持数组以兼容已有客户端：
+
+```powershell
+$response = Invoke-WebRequest "$baseUrl/pipeline-runs?limit=20&offset=0"
+$response.Headers["X-Total-Count"]
+$response.Headers["X-Limit"]
+$response.Headers["X-Offset"]
+```
+
+适用接口包括运营周期、生产管道、计划任务、告警、模型调用、审计事件、原始研究
+证据和证据采集运行。
+
+所有 API 错误均返回兼容的 `detail`，以及机器可读结构：
+
+```json
+{
+  "detail": "committee decision requires at least 2 opinions",
+  "error": {
+    "code": "DOMAIN_RULE_VIOLATION",
+    "message": "committee decision requires at least 2 opinions",
+    "request_id": "request-id",
+    "issues": []
+  }
+}
+```
+
+常用错误码包括：
+
+- `AUTHENTICATION_REQUIRED`
+- `PERMISSION_DENIED`
+- `RESOURCE_NOT_FOUND`
+- `RESOURCE_CONFLICT`
+- `DOMAIN_RULE_VIOLATION`
+- `VALIDATION_ERROR`
+
+客户端可以通过 `X-Request-ID` 传入自己的请求 ID；服务端会在响应头和错误正文中
+返回相同 ID。未提供时由服务端生成。

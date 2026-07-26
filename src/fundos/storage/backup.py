@@ -14,7 +14,7 @@ from typing import Any
 
 CRITICAL_TABLES = (
     "portfolio_products", "portfolio_versions", "research_reports", "workflow_runs",
-    "portfolio_nav", "api_audit_events",
+    "committee_opinions", "portfolio_nav", "benchmark_nav", "api_audit_events",
 )
 
 
@@ -70,6 +70,7 @@ def create_database_backup(
     manifest_path = backup_path.with_suffix(".manifest.json")
     manifest = {
         "format_version": 1,
+        "backend": "sqlite",
         "backup_file": backup_path.name,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sha256": _sha256(backup_path),

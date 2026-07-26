@@ -233,6 +233,71 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_scheduled_job_control(target: sqlite3.Connection) -> None:
+        target.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS scheduled_job_locks (
+                job_name TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                acquired_at TEXT NOT NULL,
+                lease_until TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+                run_id TEXT PRIMARY KEY,
+                job_name TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (status IN ('running', 'succeeded', 'failed', 'skipped', 'abandoned')),
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                lease_until TEXT NOT NULL,
+                message TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_name_started
+                ON scheduled_job_runs(job_name, started_at DESC);
+            """
+        )
+
+    def add_committee_opinions(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS committee_opinions (
+                opinion_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                member_role TEXT NOT NULL,
+                recommendation TEXT NOT NULL
+                    CHECK (recommendation IN ('approve', 'reject', 'abstain')),
+                rationale TEXT NOT NULL,
+                alternative_weights TEXT NOT NULL DEFAULT '{}',
+                conditions TEXT NOT NULL DEFAULT '',
+                submitted_by TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (run_id, member_role)
+            )
+            """
+        )
+
+    def add_benchmark_nav(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS benchmark_nav (
+                product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+                benchmark_symbol TEXT NOT NULL,
+                nav_date TEXT NOT NULL,
+                nav REAL NOT NULL CHECK (nav > 0),
+                PRIMARY KEY (product_id, nav_date)
+            )
+            """
+        )
+
+    def index_raw_evidence_review_queue(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_raw_evidence_review_published
+            ON raw_research_evidence (review_status, published_at)
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -245,6 +310,10 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(9, "add_research_evidence_content", add_research_evidence_content),
         Migration(10, "add_raw_research_evidence_store", add_raw_research_evidence_store),
         Migration(11, "add_evidence_collection_runs", add_evidence_collection_runs),
+        Migration(12, "add_scheduled_job_control", add_scheduled_job_control),
+        Migration(13, "add_committee_opinions", add_committee_opinions),
+        Migration(14, "add_benchmark_nav", add_benchmark_nav),
+        Migration(15, "index_raw_evidence_review_queue", index_raw_evidence_review_queue),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

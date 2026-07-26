@@ -21,12 +21,14 @@ def get_model_circuit_status(
         (provider, model),
     )
     reset_at = resets[0]["reset_at"] if resets else None
+    timestamp = database.dialect.timestamp_expression
     rows = database.fetch_all(
-        """
+        f"""
         SELECT status, created_at FROM model_calls
         WHERE provider = ? AND model = ?
-          AND datetime(created_at) > COALESCE(datetime(?), '0001-01-01 00:00:00')
-        ORDER BY datetime(created_at) DESC LIMIT ?
+          AND {timestamp("created_at")} >
+              COALESCE({timestamp("?")}, {timestamp("'0001-01-01 00:00:00'")})
+        ORDER BY {timestamp("created_at")} DESC LIMIT ?
         """,
         (provider, model, reset_at or "", failure_threshold),
     )
@@ -56,10 +58,12 @@ def reset_model_circuit(
             """
             INSERT INTO model_circuit_resets (provider, model, reset_by, reason, reset_at)
             VALUES (?, ?, ?, ?, ?)
+            RETURNING reset_id
             """,
             (provider.strip(), model.strip(), reset_by.strip(), reason.strip(), datetime.now(timezone.utc).isoformat()),
         )
-    return int(cursor.lastrowid)
+        row = cursor.fetchone()
+    return int(row["reset_id"])
 
 
 def update_alert_lifecycle(

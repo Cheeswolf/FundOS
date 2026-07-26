@@ -1,4 +1,5 @@
 import sys
+import json
 import tempfile
 import unittest
 from datetime import datetime
@@ -26,8 +27,12 @@ class BackupTests(unittest.TestCase):
         backup, manifest = create_database_backup(self.source_path, self.root / "backups")
         verification = verify_database_backup(backup, manifest)
         self.assertTrue(verification.valid)
-        self.assertEqual(verification.schema_version, 11)
+        self.assertEqual(verification.schema_version, 15)
         self.assertEqual(verification.table_counts["portfolio_products"], 1)
+        self.assertEqual(
+            json.loads(manifest.read_text(encoding="utf-8"))["backend"],
+            "sqlite",
+        )
 
         restored = self.root / "restored.sqlite3"
         self.assertIsNone(restore_database_backup(backup, restored, manifest_path=manifest))

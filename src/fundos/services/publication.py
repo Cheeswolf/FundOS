@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from fundos.storage import Database
 
@@ -18,11 +19,21 @@ def publish_portfolio_version(
     version_id: str,
     reason: str,
     approved_by: str,
+    connection: Any | None = None,
 ) -> PublicationResult:
     if not reason.strip() or not approved_by.strip():
         raise ValueError("publication reason and approver are required")
 
-    with database.connect() as connection:
+    if connection is None:
+        with database.connect() as owned_connection:
+            return publish_portfolio_version(
+                database,
+                version_id=version_id,
+                reason=reason,
+                approved_by=approved_by,
+                connection=owned_connection,
+            )
+    else:
         version = connection.execute(
             "SELECT * FROM portfolio_versions WHERE version_id = ?",
             (version_id,),
@@ -110,4 +121,3 @@ def publish_portfolio_version(
             turnover,
             "published",
         )
-

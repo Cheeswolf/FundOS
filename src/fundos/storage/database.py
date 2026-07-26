@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import date
@@ -8,6 +9,7 @@ from typing import Any
 
 from fundos.domain.models import Asset, InvestmentMandate, PortfolioProduct, PortfolioVersion, PositionWeight
 from fundos.analytics.time_series import DatedNav, DatedPrice
+from fundos.storage.dialects import SQLiteDialect
 from fundos.storage.migrations import apply_migrations
 
 
@@ -83,6 +85,14 @@ CREATE TABLE IF NOT EXISTS portfolio_version_weights (
 
 CREATE TABLE IF NOT EXISTS portfolio_nav (
     product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    nav_date TEXT NOT NULL,
+    nav REAL NOT NULL CHECK (nav > 0),
+    PRIMARY KEY (product_id, nav_date)
+);
+
+CREATE TABLE IF NOT EXISTS benchmark_nav (
+    product_id TEXT NOT NULL REFERENCES portfolio_products(product_id),
+    benchmark_symbol TEXT NOT NULL,
     nav_date TEXT NOT NULL,
     nav REAL NOT NULL CHECK (nav > 0),
     PRIMARY KEY (product_id, nav_date)
@@ -359,6 +369,42 @@ CREATE TABLE IF NOT EXISTS alert_lifecycle (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS scheduled_job_locks (
+    job_name TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    acquired_at TEXT NOT NULL,
+    lease_until TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+    run_id TEXT PRIMARY KEY,
+    job_name TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('running', 'succeeded', 'failed', 'skipped', 'abandoned')),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    lease_until TEXT NOT NULL,
+    message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_name_started
+ON scheduled_job_runs (job_name, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS committee_opinions (
+    opinion_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+    member_role TEXT NOT NULL,
+    recommendation TEXT NOT NULL
+        CHECK (recommendation IN ('approve', 'reject', 'abstain')),
+    rationale TEXT NOT NULL,
+    alternative_weights TEXT NOT NULL DEFAULT '{}',
+    conditions TEXT NOT NULL DEFAULT '',
+    submitted_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (run_id, member_role)
+);
+
 CREATE TABLE IF NOT EXISTS api_audit_events (
     audit_id TEXT PRIMARY KEY,
     request_id TEXT NOT NULL,
@@ -382,12 +428,16 @@ CREATE TABLE IF NOT EXISTS audit_retention_anchors (
     deleted_count INTEGER NOT NULL CHECK (deleted_count > 0),
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_raw_evidence_review_published
+ON raw_research_evidence (review_status, published_at);
 """
 
 
 class Database:
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
+        self.dialect = SQLiteDialect()
 
     @contextmanager
     def connect(self):
@@ -407,9 +457,37 @@ class Database:
         with self.connect() as connection:
             apply_migrations(connection, SCHEMA)
 
+    def begin_idempotent_write(
+        self,
+        connection: sqlite3.Connection,
+        key: str,
+    ) -> None:
+        self.dialect.begin_idempotent_write(connection, key)
+
     def get_schema_version(self) -> int:
         rows = self.fetch_all("SELECT MAX(version) AS version FROM schema_migrations")
         return int(rows[0]["version"] or 0)
+
+    def table_columns(self, table_name: str) -> list[str]:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) is None:
+            raise ValueError("invalid table name")
+        return [
+            str(row["name"])
+            for row in self.fetch_all(f"PRAGMA table_info({table_name})")
+        ]
+
+    def list_tables(self) -> list[str]:
+        return [
+            str(row["name"])
+            for row in self.fetch_all(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                  AND name NOT IN ('schema_migrations', 'sqlite_sequence')
+                ORDER BY name
+                """
+            )
+        ]
 
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]
@@ -538,6 +616,30 @@ class Database:
             )
         return len(rows)
 
+    def upsert_benchmark_nav(
+        self,
+        product_id: str,
+        benchmark_symbol: str,
+        values: Iterable[DatedNav],
+    ) -> int:
+        rows = [
+            (product_id, benchmark_symbol, item.nav_date.isoformat(), item.nav)
+            for item in values
+        ]
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO benchmark_nav (
+                    product_id, benchmark_symbol, nav_date, nav
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(product_id, nav_date) DO UPDATE SET
+                    benchmark_symbol = excluded.benchmark_symbol,
+                    nav = excluded.nav
+                """,
+                rows,
+            )
+        return len(rows)
+
     def create_product(self, product: PortfolioProduct) -> None:
         with self.connect() as connection:
             connection.execute(
@@ -552,31 +654,40 @@ class Database:
         self,
         product: PortfolioProduct,
         mandate: InvestmentMandate,
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> None:
         if product.product_id != mandate.product_id:
             raise ValueError("product and investment mandate IDs must match")
-        with self.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO portfolio_products (product_id, name, benchmark_symbol, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (product.product_id, product.name, product.benchmark_symbol, product.created_at.isoformat()),
-            )
-            connection.execute(
-                """
-                INSERT INTO investment_mandates (
-                    product_id, objective, risk_level, max_single_asset_weight,
-                    min_cash_weight, max_turnover, maximum_data_age_days, maximum_stress_loss
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    mandate.product_id, mandate.objective, mandate.risk_level,
-                    float(mandate.max_single_asset_weight), float(mandate.min_cash_weight),
-                    float(mandate.max_turnover), mandate.maximum_data_age_days,
-                    float(mandate.maximum_stress_loss),
-                ),
-            )
+        if connection is None:
+            with self.connect() as owned_connection:
+                self.create_product_with_mandate(
+                    product,
+                    mandate,
+                    connection=owned_connection,
+                )
+            return
+        connection.execute(
+            """
+            INSERT INTO portfolio_products (product_id, name, benchmark_symbol, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (product.product_id, product.name, product.benchmark_symbol, product.created_at.isoformat()),
+        )
+        connection.execute(
+            """
+            INSERT INTO investment_mandates (
+                product_id, objective, risk_level, max_single_asset_weight,
+                min_cash_weight, max_turnover, maximum_data_age_days, maximum_stress_loss
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                mandate.product_id, mandate.objective, mandate.risk_level,
+                float(mandate.max_single_asset_weight), float(mandate.min_cash_weight),
+                float(mandate.max_turnover), mandate.maximum_data_age_days,
+                float(mandate.maximum_stress_loss),
+            ),
+        )
 
     def upsert_investment_mandate(self, mandate: InvestmentMandate) -> None:
         with self.connect() as connection:

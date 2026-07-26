@@ -16,7 +16,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["httpx>=0.27,<1"]
+test = [
+    "coverage>=7.6,<8",
+    "httpx>=0.27,<1",
+]
+observability = [
+    "opentelemetry-api>=1.30,<2",
+    "opentelemetry-sdk>=1.30,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+]
+postgres = [
+    "psycopg[binary]>=3.2,<4",
+]
 
 [project.scripts]
 fundos-api = "fundos.api.main:run"
@@ -26,3 +37,12 @@ fundos-api = "fundos.api.main:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["fundos"]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_covered = true

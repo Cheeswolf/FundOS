@@ -50,3 +50,22 @@ class AuditIntegrityTests(unittest.TestCase):
     def test_retention_refuses_unsafe_short_window(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least 30 days"):
             purge_audit_events(self.database, retention_days=7)
+
+    def test_out_of_order_arrival_keeps_chain_order_monotonic(self) -> None:
+        now = datetime.now(timezone.utc)
+        self.record("FIRST", now)
+        self.record("LATE-ARRIVAL", now - timedelta(seconds=1))
+
+        rows = self.database.fetch_all(
+            "SELECT * FROM api_audit_events ORDER BY created_at, audit_id"
+        )
+
+        self.assertEqual(
+            [row["audit_id"] for row in rows],
+            ["FIRST", "LATE-ARRIVAL"],
+        )
+        self.assertGreater(
+            datetime.fromisoformat(rows[1]["created_at"]),
+            datetime.fromisoformat(rows[0]["created_at"]),
+        )
+        self.assertTrue(verify_audit_chain(self.database)["valid"])

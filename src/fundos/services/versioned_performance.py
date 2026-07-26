@@ -1,6 +1,12 @@
 from dataclasses import dataclass
 
-from fundos.analytics import align_prices, calculate_metrics, calculate_versioned_nav, normalize_benchmark_nav
+from fundos.analytics import (
+    TransactionCostPolicy,
+    align_prices,
+    calculate_metrics,
+    calculate_versioned_nav,
+    normalize_benchmark_nav,
+)
 from fundos.storage import Database
 
 
@@ -21,6 +27,8 @@ def calculate_and_store_versioned_performance(
     benchmark_symbol: str,
     periods_per_year: int = 252,
     annual_risk_free_rate: float = 0.0,
+    transaction_cost_rate: float = 0.0,
+    charge_initial_allocation: bool = False,
 ) -> PerformanceResult:
     versions = database.get_portfolio_versions(product_id, published_only=True)
     portfolio_symbols = sorted({position.asset_symbol for version in versions for position in version.weights})
@@ -40,6 +48,10 @@ def calculate_and_store_versioned_performance(
         dates,
         {symbol: aligned[symbol] for symbol in portfolio_symbols},
         versions,
+        transaction_cost_policy=TransactionCostPolicy(
+            rate=transaction_cost_rate,
+            charge_initial_allocation=charge_initial_allocation,
+        ),
     )
     benchmark_nav = normalize_benchmark_nav(dates, aligned[benchmark_symbol])
     portfolio_returns = [
@@ -53,6 +65,7 @@ def calculate_and_store_versioned_performance(
     )
     benchmark_return = benchmark_nav[-1].nav / benchmark_nav[0].nav - 1
     database.upsert_portfolio_nav(product_id, portfolio_nav)
+    database.upsert_benchmark_nav(product_id, benchmark_symbol, benchmark_nav)
     database.upsert_performance_snapshot(
         product_id,
         dates[-1],

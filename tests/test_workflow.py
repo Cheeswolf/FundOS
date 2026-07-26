@@ -1,4 +1,5 @@
 import sys
+import sqlite3
 import tempfile
 import unittest
 from datetime import date, datetime, timezone
@@ -17,6 +18,7 @@ from fundos.services import (  # noqa: E402
     finalize_research_report,
     publish_approved_workflow,
     record_committee_decision,
+    record_committee_opinion,
     run_risk_review,
 )
 from fundos.storage import Database  # noqa: E402
@@ -102,6 +104,96 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.state(run_id), "published")
         version = self.database.fetch_all("SELECT status FROM portfolio_versions WHERE version_id = 'V1'")[0]
         self.assertEqual(version["status"], "published")
+
+    def test_records_distinct_committee_opinions_and_enforces_quorum(self) -> None:
+        run_id = create_proposal(
+            self.database,
+            version=self.version(),
+            rationale="Initial balanced allocation",
+            created_by="portfolio-manager",
+            research_report_id="R1",
+        )
+        self.review(run_id)
+        research_opinion = record_committee_opinion(
+            self.database,
+            run_id=run_id,
+            member_role="research",
+            recommendation="approve",
+            rationale="Evidence supports the allocation.",
+            submitted_by="research-lead",
+        )
+        risk_opinion = record_committee_opinion(
+            self.database,
+            run_id=run_id,
+            member_role="risk",
+            recommendation="abstain",
+            rationale="Prefer a more defensive allocation.",
+            alternative_weights={"EQUITY": 0.40, "BOND": 0.55, "CASH": 0.05},
+            conditions="Reduce equity if volatility rises.",
+            submitted_by="risk-officer",
+        )
+        self.assertNotEqual(research_opinion, risk_opinion)
+        with self.assertRaisesRegex(ValueError, "at least 3 opinions"):
+            record_committee_decision(
+                self.database,
+                run_id=run_id,
+                approved=True,
+                rationale="Not enough opinions.",
+                decided_by="chair",
+                minimum_opinions=3,
+            )
+        decision = record_committee_decision(
+            self.database,
+            run_id=run_id,
+            approved=True,
+            rationale="Two roles reviewed the proposal.",
+            decided_by="chair",
+            minimum_opinions=2,
+        )
+        self.assertEqual(decision, "approved")
+        rows = self.database.fetch_all(
+            "SELECT * FROM committee_opinions WHERE run_id = ? ORDER BY member_role",
+            (run_id,),
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertIn('"EQUITY":0.4', rows[1]["alternative_weights"])
+
+    def test_rejects_duplicate_role_and_invalid_alternative(self) -> None:
+        run_id = create_proposal(
+            self.database,
+            version=self.version(),
+            rationale="Initial balanced allocation",
+            created_by="portfolio-manager",
+            research_report_id="R1",
+        )
+        self.review(run_id)
+        record_committee_opinion(
+            self.database,
+            run_id=run_id,
+            member_role="risk",
+            recommendation="approve",
+            rationale="Within limits.",
+            submitted_by="risk-officer",
+        )
+        with self.assertRaises(sqlite3.IntegrityError):
+            record_committee_opinion(
+                self.database,
+                run_id=run_id,
+                member_role="risk",
+                recommendation="reject",
+                rationale="Changed view.",
+                submitted_by="another-risk-officer",
+            )
+        with self.assertRaisesRegex(ValueError, "cover the proposed assets"):
+            record_committee_opinion(
+                self.database,
+                run_id=run_id,
+                member_role="research",
+                recommendation="approve",
+                rationale="Incomplete alternative.",
+                alternative_weights={"EQUITY": 1.0},
+                submitted_by="research-lead",
+            )
 
     def test_failed_risk_review_blocks_committee(self) -> None:
         run_id = create_proposal(

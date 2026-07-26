@@ -2,7 +2,10 @@
 
 ## 部署前
 
+- [ ] `deployment_preflight.py` 返回 `ready: true`；
 - [ ] 全部自动化测试通过；
+- [ ] 分支覆盖率达到 75% 门槛；
+- [ ] 20 年、6 资产性能基准低于 5 秒；
 - [ ] CI Docker 镜像构建成功；
 - [ ] `.env` 未被 Git 跟踪；
 - [ ] `FUNDOS_API_KEY` 使用足够长的随机值；
@@ -19,9 +22,30 @@
 - [ ] 仅运行一个写入实例；
 - [ ] 已生成可恢复的数据库备份；
 - [ ] 备份与生产文件不在同一故障域；
-- [ ] 启动后确认 schema version 为 2；
+- [ ] PostgreSQL 原生备份 SHA-256 校验通过，并已恢复到空临时数据库；
+- [ ] 启动后确认 schema version 为 15；
+- [ ] 增量迁移名称和 SHA-256 校验通过；
+- [ ] 回滚命令仅在已验证原生备份后演练；
 - [ ] 检查产品、组合版本和净值记录数量；
 - [ ] 已演练一次恢复到新数据库路径。
+
+如准备迁移 PostgreSQL：
+
+- [ ] 已阅读 `docs/POSTGRESQL_MIGRATION.md`，且没有误将预检能力视为运行时支持；
+- [ ] PostgreSQL 主版本为 16；
+- [ ] `python scripts/check_postgres.py` 返回 `ready: true`；
+- [ ] `python scripts/initialize_postgres.py` 完成且 schema version 为 15；
+- [ ] CI `postgres-integration` 作业通过；
+- [ ] PostgreSQL 完整业务契约、并发幂等和失败回滚用例通过；
+- [ ] SQLite 已备份，API 与调度写入已停止；
+- [ ] 搬迁报告中所有表的数量和 SHA-256 摘要验证通过；
+- [ ] PostgreSQL identity 序列已校正；
+- [ ] SQLite API 已设置 `FUNDOS_READ_ONLY=true`，且拒绝写入时审计表也不变化；
+- [ ] `drill_postgres_cutover.py` 返回 `ready_for_manual_cutover`；
+- [ ] 候选 PostgreSQL API 的三个只读冒烟端点通过；
+- [ ] `FUNDOS_DATABASE_URL` 仅在数据搬迁和回退演练完成后切换；
+- [ ] 生产连接启用 TLS；
+- [ ] 数据迁移、核对、切换和回退演练全部完成后才允许多实例运行。
 
 ## 网络与安全
 
@@ -44,6 +68,9 @@
 - [ ] 监控 `/health`；
 - [ ] 监控最近一次 `pipeline_runs` 状态；
 - [ ] 监控最新行情日期和净值日期。
+- [ ] 采集 `/metrics` 并为 5xx 错误率和延迟设置阈值；
+- [ ] 如启用 OTLP，确认 Collector 收到 `fundos-api` Span；
+- [ ] 日志、告警和链路追踪可以通过 `X-Request-ID` / `X-Trace-ID` 关联。
 
 ## 投资治理
 
@@ -66,6 +93,8 @@ GET /products/{id}/performance           → 净值日期正确
 GET /products/{id}/operations            → 非 blocked
 GET /pipeline-runs?limit=1               → succeeded
 GET /alerts?status=failed                → 无未处理异常
+GET /operations/metrics                 → 错误率和延迟正常
+GET /metrics                            → Prometheus 文本可采集
 GET /dashboard                           → 200
 ```
 
@@ -80,4 +109,3 @@ GET /dashboard                           → 200
 7. 确认后恢复调度。
 
 数据库迁移目前只向前执行。若未来迁移包含不可逆结构变化，必须在部署前提供专用回滚或数据恢复方案。
-

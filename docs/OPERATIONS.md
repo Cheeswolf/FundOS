@@ -68,6 +68,27 @@ python scripts/run_production.py --attempts 3 --retry-delay 1
 ```
 
 建议由系统任务每天收盘后运行一次。进程退出码为零表示全部成功，非零表示部分失败或完全失败。
+命令默认使用名为 `daily-production-pipeline` 的数据库租约锁，租约为 3600 秒。
+重复触发时，后启动的实例会记录为 `skipped` 并正常退出，不会重复同步或重算。
+
+可按部署环境调整：
+
+```powershell
+python scripts/run_production.py `
+  --job-name daily-production-pipeline `
+  --lease-seconds 7200
+```
+
+每次触发都会写入 `scheduled_job_runs`。状态包括：
+
+- `running`：正在执行；
+- `succeeded`：正常完成；
+- `failed`：执行异常；
+- `skipped`：已有有效租约，本次未执行；
+- `abandoned`：旧实例未完成且租约过期，已由新实例接管。
+
+活动租约位于 `scheduled_job_locks`。正常完成或失败时自动释放；进程崩溃不会永久
+锁死任务，新实例可在租约到期后接管。租约时间应大于生产管道通常所需的最长时间。
 
 ### 单独同步行情
 
@@ -77,7 +98,52 @@ python scripts/sync_market_data.py --compact
 
 首次回填历史数据时移除 `--compact`。供应商配额有限时，可用多个 `--symbol` 参数分批同步。
 
+生产管道重算业绩时会同时持久化组合净值和基准净值。仪表盘“组合总览”应显示两条曲线；
+若只显示组合曲线，先确认生产管道已在数据库迁移至 schema 15 后至少成功运行一次。
+
 ## 5. 运营节奏
+
+### 部署预检
+
+任何生产启动或 PostgreSQL 切换前，都应使用最新且已验证的备份清单执行门禁：
+
+```powershell
+python scripts/deployment_preflight.py `
+  --mode production `
+  --backup-manifest backups\<latest>.manifest.json
+```
+
+切换窗口使用 `--mode cutover`，此时 `FUNDOS_READ_ONLY` 必须为 `true`。报告中的
+`ready` 只有在全部阻断项通过时才为真；告警 Webhook 和 OpenTelemetry 缺失目前记为
+警告。报告不会输出 API Key 或数据库密码。
+
+SQLite 备份只可作为 SQLite 正式运行或 PostgreSQL 切换窗口的回退证据，不能证明
+已开放写入的 PostgreSQL 具备可恢复备份。PostgreSQL 正式生产预检会因此阻断，直到
+配置并验证 PostgreSQL 原生备份。
+
+### PostgreSQL 备份与恢复演练
+
+主库使用 PostgreSQL 后，创建 custom-format 原生备份：
+
+```powershell
+python scripts/backup_postgres.py
+```
+
+工具调用 `pg_dump`，生成 `.dump` 与 `.manifest.json`，记录 schema、逐表数量、
+文件大小和 SHA-256。密码只通过 `PGPASSWORD` 子进程环境传递，不写入命令参数或
+清单。
+
+由管理员预先创建一个完全空的临时数据库，然后恢复演练：
+
+```powershell
+$env:FUNDOS_RESTORE_DATABASE_URL = "postgresql://..."
+python scripts/drill_postgres_restore.py `
+  backups\postgresql\<backup>.dump `
+  --confirm-empty-target
+```
+
+工具不会创建、清空或删除数据库，也不使用 `pg_restore --clean`。恢复后必须与清单
+中的 schema 版本和逐表数量完全一致。
 
 ### 每日
 
@@ -94,6 +160,23 @@ python scripts/sync_market_data.py --compact
 3. 执行风险规则和压力测试；
 4. 投委会批准、拒绝或暂缓；
 5. 批准后发布新版本。
+
+上述步骤可以在仪表盘“决策操作”页执行。页面只显示当前工作流状态允许的下一步：
+
+- 草稿研究可以定稿；
+- 已定稿研究可以创建候选组合；
+- `proposed` 只能进入风险审查；
+- `risk_passed` 才能提交投委会通过或拒绝；
+- `approved` 才能正式发布。
+
+密钥不会持久化到浏览器存储。发布前页面会再次确认，服务端仍执行角色权限、
+工作流状态、风险硬规则和幂等检查。
+
+投委会阶段先收集委员独立意见，再由主席形成最终决策。每个角色只能提交一次
+不可变意见，可记录通过、拒绝、弃权、附加条件和一套完整备选权重。操作台默认
+要求至少两份角色意见后才开放主席决策按钮；服务端也按请求中的
+`minimum_opinions` 再次校验。反对或弃权意见不会被最终决策覆盖，仍会长期保留
+在工作流和备份中。
 
 ### 每月
 
@@ -120,10 +203,37 @@ python scripts/sync_market_data.py --compact
 
 ```text
 GET /pipeline-runs
+GET /scheduled-jobs/runs
+GET /scheduled-jobs/locks
 GET /alerts?status=pending
 GET /alerts?status=failed
 GET /products/{product_id}/operations
+GET /operations/metrics
+GET /metrics
 ```
+
+仪表盘“运行监控”页同时展示最近调度、生产管道、活动租约和异常运行数量。
+`/scheduled-jobs/runs` 支持 `job_name`、`status` 和 `limit` 查询参数；对外结果
+不会返回内部租约持有者 ID。
+
+运行记录列表还支持 `offset`。响应头中的 `X-Total-Count`、`X-Limit` 和
+`X-Offset` 可用于构建分页界面，正文仍保持数组。所有错误响应都包含稳定错误码
+和 `request_id`，排障时应同时记录 HTTP 状态码、`error.code` 和请求 ID。
+
+`/operations/metrics` 返回请求量、4xx/5xx 错误率、各路由最大延迟及累计耗时；
+`/metrics` 输出 Prometheus 文本。两者均要求 operator 或 admin 密钥。每个 HTTP
+响应还包含 `X-Trace-ID` 和 `Server-Timing`。
+
+启用 OpenTelemetry OTLP 导出：
+
+```powershell
+python -m pip install -e ".[observability]"
+$env:OTEL_SERVICE_NAME = "fundos-api"
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://otel-collector:4318"
+```
+
+未安装可观测性扩展或未配置 OTLP 地址时，本地指标、Trace ID 和延迟监控仍正常
+工作，只是不向外部 Collector 导出 Span。
 
 ## 7. 故障处理
 
@@ -158,4 +268,3 @@ GET /products/{product_id}/operations
 ## 8. SQLite 运行边界
 
 当前 SQLite 方案适合 MVP 单实例运行。不要同时启动多个写入副本，也不要将同一数据库文件挂载给多个容器实例。需要多实例、高并发或更严格高可用时，应先迁移至 PostgreSQL。
-

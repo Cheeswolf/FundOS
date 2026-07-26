@@ -49,18 +49,31 @@
     ]
   },
   "performance_policy": {
-    "status": "gross_of_investor_transaction_costs",
+    "status": "transaction_cost_model_available_pending_rate_approval",
     "fund_operating_expenses": "already_reflected_in_published_fund_nav",
     "subscription_fees": "excluded_pending_distribution_channel_approval",
     "redemption_fees": "excluded_pending_holding_period_policy",
-    "rebalance_costs": "excluded_pending_fee_schedule",
+    "rebalance_costs": {
+      "model": "one_way_turnover_times_rate",
+      "rate_bps": null,
+      "charge_initial_allocation": false,
+      "deduction_timing": "effective_common_valuation_date",
+      "approval_status": "pending"
+    },
     "cash_return": "zero_until_cash_yield_policy_is_approved",
-    "required_disclosure": "历史模拟业绩，基于基金复权净值，未扣申购、赎回及调仓成本，不代表实盘或可实现收益。"
+    "required_disclosure": "历史模拟业绩，基于基金复权净值；调仓成本在费率获批后按单边换手率扣除，申购及赎回费用尚未计入，不代表实盘或可实现收益。"
   },
   "data_policy": {
     "trial_source": "tushare-pro",
     "production_source": "licensed-provider-required",
     "price_field_preference": ["adj_nav", "accum_nav", "unit_nav", "close"],
+    "valuation_alignment": {
+      "method": "point_in_time_asof_carry_forward",
+      "date_basis": "available_date",
+      "maximum_carry_days": 14,
+      "future_backfill_allowed": false,
+      "common_series_required": true
+    },
     "record_announcement_date": true,
     "record_source_timestamp": true,
     "reject_unlicensed_public_redistribution": true,

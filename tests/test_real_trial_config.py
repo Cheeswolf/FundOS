@@ -65,6 +65,19 @@ class RealTrialProductConfigTests(unittest.TestCase):
         self.assertEqual(provider_codes["CSI500"], "160119.SZ")
         self.assertEqual(provider_codes["BOND"], "161119.SZ")
 
+    def test_rebalance_cost_policy_is_explicit_but_not_silently_enabled(self) -> None:
+        policy = self.configuration["performance_policy"]["rebalance_costs"]
+        self.assertEqual(policy["model"], "one_way_turnover_times_rate")
+        self.assertEqual(policy["deduction_timing"], "effective_common_valuation_date")
+        self.assertIsNone(policy["rate_bps"])
+        self.assertEqual(policy["approval_status"], "pending")
+
+    def test_valuation_alignment_is_point_in_time_safe(self) -> None:
+        policy = self.configuration["data_policy"]["valuation_alignment"]
+        self.assertEqual(policy["date_basis"], "available_date")
+        self.assertFalse(policy["future_backfill_allowed"])
+        self.assertGreaterEqual(policy["maximum_carry_days"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

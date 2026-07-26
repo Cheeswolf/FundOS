@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
-from typing import Mapping
+import json
+from typing import Any, Mapping
 from uuid import uuid4
 
 from fundos.domain import PortfolioVersion
@@ -27,6 +28,70 @@ class RiskReviewReport:
 
     def __iter__(self):
         return iter(self.checks)
+
+
+def record_committee_opinion(
+    database: Database,
+    *,
+    run_id: str,
+    member_role: str,
+    recommendation: str,
+    rationale: str,
+    submitted_by: str,
+    alternative_weights: Mapping[str, float] | None = None,
+    conditions: str = "",
+) -> str:
+    role = member_role.strip()
+    author = submitted_by.strip()
+    if not role or not rationale.strip() or not author:
+        raise ValueError("committee role, rationale and submitter are required")
+    if recommendation not in {"approve", "reject", "abstain"}:
+        raise ValueError("committee recommendation is invalid")
+    alternative = dict(alternative_weights or {})
+    if alternative:
+        if any(not 0 <= float(weight) <= 1 for weight in alternative.values()):
+            raise ValueError("alternative weights must be between 0 and 1")
+        if abs(sum(float(weight) for weight in alternative.values()) - 1) > 0.0001:
+            raise ValueError("alternative weights must sum to 1")
+
+    opinion_id = str(uuid4())
+    with database.connect() as connection:
+        run = connection.execute(
+            "SELECT state, version_id FROM workflow_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if run is None:
+            raise ValueError("workflow run does not exist")
+        if run["state"] != "risk_passed":
+            raise ValueError("committee opinions require passed risk review")
+        if connection.execute(
+            "SELECT 1 FROM committee_decisions WHERE run_id = ?", (run_id,)
+        ).fetchone():
+            raise ValueError("committee decision is already final")
+        if alternative:
+            proposal_symbols = {
+                row["asset_symbol"]
+                for row in connection.execute(
+                    "SELECT asset_symbol FROM portfolio_version_weights WHERE version_id = ?",
+                    (run["version_id"],),
+                ).fetchall()
+            }
+            if set(alternative) != proposal_symbols:
+                raise ValueError("alternative weights must cover the proposed assets")
+        connection.execute(
+            """
+            INSERT INTO committee_opinions (
+                opinion_id, run_id, member_role, recommendation, rationale,
+                alternative_weights, conditions, submitted_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                opinion_id, run_id, role, recommendation, rationale.strip(),
+                json.dumps(alternative, sort_keys=True, separators=(",", ":")),
+                conditions.strip(), author,
+            ),
+        )
+    return opinion_id
 
 
 def create_proposal(
@@ -214,15 +279,26 @@ def record_committee_decision(
     approved: bool,
     rationale: str,
     decided_by: str,
+    minimum_opinions: int = 0,
 ) -> str:
     if not rationale.strip() or not decided_by.strip():
         raise ValueError("decision rationale and decision maker are required")
+    if minimum_opinions < 0:
+        raise ValueError("minimum committee opinions cannot be negative")
     with database.connect() as connection:
         run = connection.execute("SELECT state FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
         if run is None:
             raise ValueError("workflow run does not exist")
         if run["state"] != "risk_passed":
             raise ValueError("committee decision requires passed risk review")
+        opinion_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM committee_opinions WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()["count"]
+        if opinion_count < minimum_opinions:
+            raise ValueError(
+                f"committee decision requires at least {minimum_opinions} opinions"
+            )
         decision = "approved" if approved else "rejected"
         connection.execute(
             "INSERT INTO committee_decisions (run_id, decision, rationale, decided_by) VALUES (?, ?, ?, ?)",
@@ -235,22 +311,42 @@ def record_committee_decision(
         return decision
 
 
-def publish_approved_workflow(database: Database, *, run_id: str) -> PublicationResult:
-    run = database.fetch_all("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,))
-    if not run:
+def publish_approved_workflow(
+    database: Database,
+    *,
+    run_id: str,
+    connection: Any | None = None,
+) -> PublicationResult:
+    if connection is None:
+        with database.connect() as owned_connection:
+            return publish_approved_workflow(
+                database,
+                run_id=run_id,
+                connection=owned_connection,
+            )
+    run = connection.execute(
+        "SELECT * FROM workflow_runs WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if run is None:
         raise ValueError("workflow run does not exist")
-    if run[0]["state"] != "approved":
+    if run["state"] != "approved":
         raise ValueError("publication requires committee approval")
-    decision = database.fetch_all("SELECT * FROM committee_decisions WHERE run_id = ?", (run_id,))[0]
+    decision = connection.execute(
+        "SELECT * FROM committee_decisions WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if decision is None:
+        raise ValueError("committee decision does not exist")
     result = publish_portfolio_version(
         database,
-        version_id=run[0]["version_id"],
+        version_id=run["version_id"],
         reason=decision["rationale"],
         approved_by=decision["decided_by"],
+        connection=connection,
     )
-    with database.connect() as connection:
-        connection.execute(
-            "UPDATE workflow_runs SET state = 'published', updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
-            (run_id,),
-        )
+    connection.execute(
+        "UPDATE workflow_runs SET state = 'published', updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
+        (run_id,),
+    )
     return result

@@ -2,7 +2,7 @@ import time
 import logging
 from dataclasses import dataclass
 from datetime import date
-from typing import Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from fundos.data_providers import AlphaVantageError, PriceRow
@@ -35,7 +35,7 @@ def run_production_pipeline(
     market_provider: DailyPriceProvider,
     provider_name: str,
     symbol_mappings: Mapping[str, str],
-    portfolios: Sequence[Mapping[str, str]],
+    portfolios: Sequence[Mapping[str, Any]],
     as_of_date: date,
     max_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
@@ -131,6 +131,8 @@ def run_production_pipeline(
                 provider=provider_name,
                 benchmark_symbol=portfolio["benchmark_symbol"],
                 as_of_date=as_of_date,
+                transaction_cost_rate=float(portfolio.get("transaction_cost_rate", 0.0)),
+                charge_initial_allocation=bool(portfolio.get("charge_initial_allocation", False)),
             )
             if result.status == "blocked":
                 errors.append(f"{product_id}: {result.message}")

@@ -1,16 +1,21 @@
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from fundos.analytics import DatedNav  # noqa: E402
 from fundos.api import create_app  # noqa: E402
 from fundos.domain import Asset, PortfolioProduct  # noqa: E402
-from fundos.services import import_raw_research_evidence, register_research_sources  # noqa: E402
+from fundos.services import (  # noqa: E402
+    import_raw_research_evidence,
+    register_research_sources,
+    run_scheduled_job,
+)
 
 
 class ApiTests(unittest.TestCase):
@@ -25,9 +30,90 @@ class ApiTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_health(self) -> None:
-        response = self.client.get("/health")
+        response = self.client.get(
+            "/health", headers={"X-Request-ID": "health-request-1"},
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(response.headers["X-Request-ID"], "health-request-1")
+        self.assertEqual(len(response.headers["X-Trace-ID"]), 32)
+        self.assertIn("app;dur=", response.headers["Server-Timing"])
+
+    def test_exposes_json_and_prometheus_runtime_metrics(self) -> None:
+        self.client.get("/products/missing")
+        self.client.get("/not-a-real-route/with-id-123")
+        summary = self.client.get(
+            "/operations/metrics", headers=self.write_headers,
+        )
+        self.assertEqual(summary.status_code, 200)
+        payload = summary.json()
+        self.assertGreaterEqual(payload["request_count"], 1)
+        self.assertGreaterEqual(payload["error_count"], 2)
+        self.assertGreater(payload["error_rate"], 0)
+        product_series = [
+            item for item in payload["series"]
+            if item["path"] == "/products/{product_id}" and item["status_code"] == 404
+        ]
+        self.assertEqual(product_series[0]["count"], 1)
+        self.assertGreaterEqual(product_series[0]["duration_seconds_max"], 0)
+        self.assertTrue(any(
+            item["path"] == "__unmatched__" for item in payload["series"]
+        ))
+
+        prometheus = self.client.get("/metrics", headers=self.write_headers)
+        self.assertEqual(prometheus.status_code, 200)
+        self.assertIn("text/plain", prometheus.headers["content-type"])
+        self.assertIn("fundos_http_requests_total", prometheus.text)
+        self.assertIn('path="/products/{product_id}"', prometheus.text)
+
+    def test_errors_have_stable_code_message_and_request_id(self) -> None:
+        unauthorized = self.client.post(
+            "/assets",
+            headers={"X-Request-ID": "auth-request-1"},
+            json=[{"symbol": "A", "name": "A", "asset_class": "equity"}],
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(
+            unauthorized.json()["error"],
+            {
+                "code": "AUTHENTICATION_REQUIRED",
+                "message": "invalid or missing API key",
+                "request_id": "auth-request-1",
+                "issues": [],
+            },
+        )
+        self.assertEqual(unauthorized.json()["detail"], "invalid or missing API key")
+
+        domain = self.client.post(
+            "/research/missing/finalize",
+            headers={**self.write_headers, "X-Request-ID": "domain-request-1"},
+        )
+        self.assertEqual(domain.status_code, 422)
+        self.assertEqual(domain.json()["error"]["code"], "DOMAIN_RULE_VIOLATION")
+        self.assertEqual(domain.json()["error"]["request_id"], "domain-request-1")
+
+        validation = self.client.get(
+            "/pipeline-runs?limit=0",
+            headers={"X-Request-ID": "validation-request-1"},
+        )
+        self.assertEqual(validation.status_code, 422)
+        self.assertEqual(validation.json()["error"]["code"], "VALIDATION_ERROR")
+        self.assertTrue(validation.json()["error"]["issues"])
+
+    def test_openapi_declares_standard_error_model(self) -> None:
+        schema = self.client.get("/openapi.json").json()
+        self.assertIn("ApiErrorResponse", schema["components"]["schemas"])
+        self.assertIn("ScheduledJobRunResponse", schema["components"]["schemas"])
+        self.assertEqual(
+            schema["paths"]["/pipeline-runs"]["get"]["responses"]["422"]["content"]
+            ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ApiErrorResponse",
+        )
+        headers = schema["paths"]["/pipeline-runs"]["get"]["responses"]["200"]["headers"]
+        self.assertEqual(
+            set(headers),
+            {"X-Total-Count", "X-Limit", "X-Offset"},
+        )
 
     def test_dashboard_is_served(self) -> None:
         response = self.client.get("/dashboard")
@@ -36,6 +122,16 @@ class ApiTests(unittest.TestCase):
         self.assertIn("组合总览", response.text)
         self.assertIn("fundos-index-allocation-trial", response.text)
         self.assertIn("历史模拟业绩", response.text)
+        self.assertIn("运行监控", response.text)
+        self.assertIn("/scheduled-jobs/runs", response.text)
+        self.assertIn("决策操作", response.text)
+        self.assertIn("proposalForm", response.text)
+        self.assertIn("/committee-decision", response.text)
+        self.assertIn("/committee-opinions", response.text)
+        self.assertIn("minimum_opinions:2", response.text)
+        self.assertIn("Idempotency-Key", response.text)
+        self.assertIn("组合与基准净值", response.text)
+        self.assertIn("perf.benchmark_nav", response.text)
 
     def test_lists_and_gets_product(self) -> None:
         self.app.state.database.create_product(
@@ -48,14 +144,105 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["product"]["name"], "Test Portfolio")
 
+    def test_performance_returns_portfolio_and_benchmark_curves(self) -> None:
+        self.app.state.database.create_product(
+            PortfolioProduct("P1", "Test Portfolio", "BM", datetime.now())
+        )
+        self.app.state.database.upsert_portfolio_nav(
+            "P1",
+            [
+                DatedNav(date(2026, 7, 1), 1.0),
+                DatedNav(date(2026, 7, 2), 1.1),
+            ],
+        )
+        self.app.state.database.upsert_benchmark_nav(
+            "P1",
+            "BM",
+            [
+                DatedNav(date(2026, 7, 1), 1.0),
+                DatedNav(date(2026, 7, 2), 1.05),
+            ],
+        )
+
+        response = self.client.get("/products/P1/performance")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["nav"][-1]["nav"], 1.1)
+        self.assertEqual(
+            payload["benchmark_nav"],
+            [
+                {
+                    "benchmark_symbol": "BM",
+                    "nav_date": "2026-07-01",
+                    "nav": 1.0,
+                },
+                {
+                    "benchmark_symbol": "BM",
+                    "nav_date": "2026-07-02",
+                    "nav": 1.05,
+                },
+            ],
+        )
+
     def test_missing_resources_return_404(self) -> None:
         self.assertEqual(self.client.get("/products/missing").status_code, 404)
         self.assertEqual(self.client.get("/workflows/missing").status_code, 404)
         self.assertEqual(self.client.get("/products/missing/operations").json(), [])
         self.assertEqual(self.client.get("/pipeline-runs").json(), [])
         self.assertEqual(self.client.get("/alerts").json(), [])
+        self.assertEqual(self.client.get("/scheduled-jobs/runs").json(), [])
+        self.assertEqual(self.client.get("/scheduled-jobs/locks").json(), [])
         self.assertEqual(self.client.get("/model-calls").json(), [])
         self.assertIsNone(self.client.get("/model-calls/summary").json()["success_rate"])
+
+    def test_lists_scheduled_job_runs_and_active_locks_without_owner_id(self) -> None:
+        run_scheduled_job(
+            self.app.state.database,
+            job_name="daily-production",
+            task=lambda: "done",
+        )
+        runs = self.client.get("/scheduled-jobs/runs?job_name=daily-production").json()
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["status"], "succeeded")
+        self.assertNotIn("owner_id", runs[0])
+
+        now = datetime.now(timezone.utc)
+        with self.app.state.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scheduled_job_locks
+                    (job_name, owner_id, acquired_at, lease_until)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "weekly-research", "private-owner", now.isoformat(),
+                    (now + timedelta(minutes=10)).isoformat(),
+                ),
+            )
+        locks = self.client.get("/scheduled-jobs/locks").json()
+        self.assertEqual(locks[0]["job_name"], "weekly-research")
+        self.assertTrue(locks[0]["active"])
+        self.assertNotIn("owner_id", locks[0])
+
+    def test_list_pagination_preserves_array_response_and_sets_metadata(self) -> None:
+        for index in range(3):
+            run_scheduled_job(
+                self.app.state.database,
+                job_name=f"job-{index}",
+                task=lambda: "done",
+            )
+        response = self.client.get("/scheduled-jobs/runs?limit=1&offset=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.headers["X-Total-Count"], "3")
+        self.assertEqual(response.headers["X-Limit"], "1")
+        self.assertEqual(response.headers["X-Offset"], "1")
+
+    def test_rejects_invalid_scheduled_job_status_filter(self) -> None:
+        response = self.client.get("/scheduled-jobs/runs?status=unknown")
+        self.assertEqual(response.status_code, 422)
 
     def test_admin_reviews_raw_research_evidence(self) -> None:
         self.app.state.database.upsert_assets([Asset("BOND", "Bond", "bond")])
@@ -173,6 +360,42 @@ class ApiTests(unittest.TestCase):
             {"symbol": "A", "name": "Asset", "asset_class": "equity"}
         ])
         self.assertEqual(response.status_code, 401)
+
+    def test_read_only_window_allows_reads_and_blocks_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                Path(directory) / "read-only.sqlite3",
+                api_key="test-secret",
+                read_only=True,
+            )
+            with TestClient(app) as client:
+                health = client.get("/health")
+                blocked = client.post(
+                    "/assets",
+                    headers={"X-API-Key": "test-secret"},
+                    json=[
+                        {
+                            "symbol": "BLOCKED",
+                            "name": "Blocked",
+                            "asset_class": "cash",
+                        }
+                    ],
+                )
+
+            self.assertEqual(health.status_code, 200)
+            self.assertEqual(blocked.status_code, 503)
+            self.assertEqual(blocked.json()["error"]["code"], "READ_ONLY_WINDOW")
+            self.assertEqual(blocked.headers["Retry-After"], "60")
+            self.assertEqual(
+                app.state.database.fetch_all(
+                    "SELECT * FROM assets WHERE symbol = 'BLOCKED'"
+                ),
+                [],
+            )
+            self.assertEqual(
+                app.state.database.fetch_all("SELECT * FROM api_audit_events"),
+                [],
+            )
 
     def test_role_scoped_keys_separate_operations_from_admin_actions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -354,10 +577,24 @@ class ApiTests(unittest.TestCase):
         })
         self.assertEqual(risk.status_code, 200)
         self.assertTrue(risk.json()["passed"])
+        opinion = self.client.post(
+            "/workflows/RUN1/committee-opinions",
+            headers=self.write_headers,
+            json={
+                "member_role": "risk",
+                "recommendation": "approve",
+                "rationale": "All hard limits passed.",
+                "alternative_weights": [],
+                "conditions": "",
+                "submitted_by": "risk-officer",
+            },
+        )
+        self.assertEqual(opinion.status_code, 201)
         decision = self.client.post("/workflows/RUN1/committee-decision", headers=self.write_headers, json={
             "approved": True,
             "rationale": "All constraints passed.",
             "decided_by": "investment-committee",
+            "minimum_opinions": 1,
         })
         self.assertEqual(decision.status_code, 200)
         publish_headers = {**self.write_headers, "Idempotency-Key": "publish-RUN1"}
@@ -369,6 +606,45 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(repeated_publish.json(), published.json())
         workflow = self.client.get("/workflows/RUN1").json()
         self.assertEqual(workflow["run"]["state"], "published")
+        self.assertEqual(workflow["committee_opinions"][0]["member_role"], "risk")
+        self.assertEqual(workflow["committee_opinions"][0]["alternative_weights"], {})
+
+    def test_operator_can_finalize_draft_research(self) -> None:
+        self.client.post("/assets", headers=self.write_headers, json=[
+            {"symbol": "EQUITY", "name": "Equity", "asset_class": "equity"},
+        ])
+        self.app.state.database.create_product(
+            PortfolioProduct("P1", "Portfolio", "BM", datetime.now())
+        )
+        created = self.client.post("/research", headers=self.write_headers, json={
+            "report_id": "DRAFT1",
+            "product_id": "P1",
+            "as_of_date": "2026-07-01",
+            "market_regime": "neutral",
+            "summary": "Draft research.",
+            "confidence": 0.7,
+            "evidence": [{
+                "evidence_id": "E1",
+                "title": "Evidence",
+                "source": "fixture",
+                "url": "https://example.test/evidence",
+                "published_at": "2026-07-01T00:00:00Z",
+            }],
+            "asset_views": [{
+                "asset_symbol": "EQUITY",
+                "direction": "neutral",
+                "confidence": 0.7,
+                "thesis": "Balanced.",
+                "evidence_ids": ["E1"],
+            }],
+            "finalize": False,
+        })
+        self.assertEqual(created.status_code, 201)
+        finalized = self.client.post(
+            "/research/DRAFT1/finalize", headers=self.write_headers,
+        )
+        self.assertEqual(finalized.status_code, 200)
+        self.assertEqual(finalized.json()["status"], "final")
 
 
 if __name__ == "__main__":

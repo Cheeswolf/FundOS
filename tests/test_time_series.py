@@ -5,10 +5,61 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from fundos.analytics import DatedPrice, align_prices, prices_to_returns, returns_to_dated_nav  # noqa: E402
+from fundos.analytics import (  # noqa: E402
+    DatedPrice,
+    align_prices,
+    align_prices_asof,
+    prices_to_returns,
+    returns_to_dated_nav,
+)
 
 
 class TimeSeriesTests(unittest.TestCase):
+    def test_asof_alignment_carries_only_past_observations(self) -> None:
+        dates, aligned, quality = align_prices_asof(
+            [
+                DatedPrice("A", date(2026, 7, 1), 100),
+                DatedPrice("A", date(2026, 7, 2), 110),
+                DatedPrice("A", date(2026, 7, 3), 121),
+                DatedPrice("B", date(2026, 7, 1), 200),
+                DatedPrice("B", date(2026, 7, 3), 220),
+            ],
+            ["A", "B"],
+            maximum_age_days=2,
+        )
+        self.assertEqual(dates, [date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)])
+        self.assertEqual(aligned["B"], [200, 200, 220])
+        self.assertEqual(quality.carried_values, 1)
+        self.assertEqual(quality.maximum_age_days, 1)
+
+    def test_asof_alignment_rejects_stale_carried_value(self) -> None:
+        with self.assertRaisesRegex(ValueError, "price for B is 2 days old"):
+            align_prices_asof(
+                [
+                    DatedPrice("A", date(2026, 7, 1), 100),
+                    DatedPrice("A", date(2026, 7, 3), 110),
+                    DatedPrice("B", date(2026, 7, 1), 200),
+                    DatedPrice("B", date(2026, 7, 4), 220),
+                ],
+                ["A", "B"],
+                maximum_age_days=1,
+            )
+
+    def test_asof_alignment_uses_observation_before_common_start(self) -> None:
+        dates, aligned, quality = align_prices_asof(
+            [
+                DatedPrice("A", date(2026, 6, 30), 100),
+                DatedPrice("A", date(2026, 7, 3), 110),
+                DatedPrice("B", date(2026, 7, 1), 200),
+                DatedPrice("B", date(2026, 7, 3), 220),
+            ],
+            ["A", "B"],
+            maximum_age_days=2,
+        )
+        self.assertEqual(dates, [date(2026, 7, 1), date(2026, 7, 3)])
+        self.assertEqual(aligned["A"], [100, 110])
+        self.assertEqual(quality.maximum_age_days, 1)
+
     def test_aligns_on_common_dates_and_calculates_returns(self) -> None:
         prices = [
             DatedPrice("A", date(2026, 7, 1), 100),
@@ -44,4 +95,3 @@ class TimeSeriesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
