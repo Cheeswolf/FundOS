@@ -19,7 +19,7 @@
 - [ ] 仅运行一个写入实例；
 - [ ] 已生成可恢复的数据库备份；
 - [ ] 备份与生产文件不在同一故障域；
-- [ ] 启动后确认 schema version 为 2；
+- [ ] 启动后确认 schema version 为 13；
 - [ ] 检查产品、组合版本和净值记录数量；
 - [ ] 已演练一次恢复到新数据库路径。
 
@@ -44,6 +44,9 @@
 - [ ] 监控 `/health`；
 - [ ] 监控最近一次 `pipeline_runs` 状态；
 - [ ] 监控最新行情日期和净值日期。
+- [ ] 采集 `/metrics` 并为 5xx 错误率和延迟设置阈值；
+- [ ] 如启用 OTLP，确认 Collector 收到 `fundos-api` Span；
+- [ ] 日志、告警和链路追踪可以通过 `X-Request-ID` / `X-Trace-ID` 关联。
 
 ## 投资治理
 
@@ -66,6 +69,8 @@ GET /products/{id}/performance           → 净值日期正确
 GET /products/{id}/operations            → 非 blocked
 GET /pipeline-runs?limit=1               → succeeded
 GET /alerts?status=failed                → 无未处理异常
+GET /operations/metrics                 → 错误率和延迟正常
+GET /metrics                            → Prometheus 文本可采集
 GET /dashboard                           → 200
 ```
 
@@ -80,4 +85,3 @@ GET /dashboard                           → 200
 7. 确认后恢复调度。
 
 数据库迁移目前只向前执行。若未来迁移包含不可逆结构变化，必须在部署前提供专用回滚或数据恢复方案。
-

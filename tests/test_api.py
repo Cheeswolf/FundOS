@@ -35,6 +35,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
         self.assertEqual(response.headers["X-Request-ID"], "health-request-1")
+        self.assertEqual(len(response.headers["X-Trace-ID"]), 32)
+        self.assertIn("app;dur=", response.headers["Server-Timing"])
+
+    def test_exposes_json_and_prometheus_runtime_metrics(self) -> None:
+        self.client.get("/products/missing")
+        self.client.get("/not-a-real-route/with-id-123")
+        summary = self.client.get(
+            "/operations/metrics", headers=self.write_headers,
+        )
+        self.assertEqual(summary.status_code, 200)
+        payload = summary.json()
+        self.assertGreaterEqual(payload["request_count"], 1)
+        self.assertGreaterEqual(payload["error_count"], 2)
+        self.assertGreater(payload["error_rate"], 0)
+        product_series = [
+            item for item in payload["series"]
+            if item["path"] == "/products/{product_id}" and item["status_code"] == 404
+        ]
+        self.assertEqual(product_series[0]["count"], 1)
+        self.assertGreaterEqual(product_series[0]["duration_seconds_max"], 0)
+        self.assertTrue(any(
+            item["path"] == "__unmatched__" for item in payload["series"]
+        ))
+
+        prometheus = self.client.get("/metrics", headers=self.write_headers)
+        self.assertEqual(prometheus.status_code, 200)
+        self.assertIn("text/plain", prometheus.headers["content-type"])
+        self.assertIn("fundos_http_requests_total", prometheus.text)
+        self.assertIn('path="/products/{product_id}"', prometheus.text)
 
     def test_errors_have_stable_code_message_and_request_id(self) -> None:
         unauthorized = self.client.post(

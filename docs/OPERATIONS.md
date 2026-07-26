@@ -163,6 +163,8 @@ GET /scheduled-jobs/locks
 GET /alerts?status=pending
 GET /alerts?status=failed
 GET /products/{product_id}/operations
+GET /operations/metrics
+GET /metrics
 ```
 
 仪表盘“运行监控”页同时展示最近调度、生产管道、活动租约和异常运行数量。
@@ -172,6 +174,21 @@ GET /products/{product_id}/operations
 运行记录列表还支持 `offset`。响应头中的 `X-Total-Count`、`X-Limit` 和
 `X-Offset` 可用于构建分页界面，正文仍保持数组。所有错误响应都包含稳定错误码
 和 `request_id`，排障时应同时记录 HTTP 状态码、`error.code` 和请求 ID。
+
+`/operations/metrics` 返回请求量、4xx/5xx 错误率、各路由最大延迟及累计耗时；
+`/metrics` 输出 Prometheus 文本。两者均要求 operator 或 admin 密钥。每个 HTTP
+响应还包含 `X-Trace-ID` 和 `Server-Timing`。
+
+启用 OpenTelemetry OTLP 导出：
+
+```powershell
+python -m pip install -e ".[observability]"
+$env:OTEL_SERVICE_NAME = "fundos-api"
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://otel-collector:4318"
+```
+
+未安装可观测性扩展或未配置 OTLP 地址时，本地指标、Trace ID 和延迟监控仍正常
+工作，只是不向外部 Collector 导出 Span。
 
 ## 7. 故障处理
 

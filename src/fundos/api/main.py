@@ -8,6 +8,7 @@ from hashlib import sha256
 from hmac import compare_digest
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
@@ -44,6 +45,7 @@ from fundos.domain import (
     ResearchEvidence,
     ResearchReport,
 )
+from fundos.core import MetricsRegistry, configure_opentelemetry, trace_request
 from fundos.services import (
     build_approved_research_request,
     create_proposal,
@@ -190,6 +192,8 @@ def create_app(
         },
     )
     app.state.database = database
+    app.state.metrics = MetricsRegistry()
+    app.state.opentelemetry_enabled = configure_opentelemetry()
     configured_keys = dict(api_keys or {})
     if api_keys is None:
         serialized_keys = os.environ.get("FUNDOS_API_KEYS_JSON", "").strip()
@@ -259,8 +263,41 @@ def create_app(
         )
 
     @app.middleware("http")
+    async def observe_http_requests(request: Request, call_next):
+        request_id = getattr(request.state, "request_id", None)
+        if not request_id:
+            request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
+            request.state.request_id = request_id
+        started = perf_counter()
+        status_code = 500
+        with trace_request(
+            method=request.method,
+            path=request.url.path,
+            request_id=request_id,
+        ) as trace_id:
+            try:
+                response = await call_next(request)
+                status_code = response.status_code
+                return response
+            finally:
+                duration = perf_counter() - started
+                route = request.scope.get("route")
+                route_path = getattr(route, "path", "__unmatched__")
+                app.state.metrics.observe(
+                    method=request.method,
+                    path=route_path,
+                    status_code=status_code,
+                    duration_seconds=duration,
+                )
+                if "response" in locals():
+                    response.headers["X-Trace-ID"] = trace_id
+                    response.headers["Server-Timing"] = f"app;dur={duration * 1000:.3f}"
+
+    @app.middleware("http")
     async def audit_mutating_requests(request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
+        request_id = getattr(request.state, "request_id", None)
+        if not request_id:
+            request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
         request.state.request_id = request_id
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             response = await call_next(request)
@@ -317,6 +354,48 @@ def create_app(
     @app.get("/health", tags=["system"], response_model=HealthResponse)
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get(
+        "/metrics",
+        tags=["system"],
+        dependencies=[Depends(require_operator)],
+        response_class=Response,
+    )
+    def prometheus_metrics(request: Request) -> Response:
+        return Response(
+            content=request.app.state.metrics.prometheus(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
+    @app.get(
+        "/operations/metrics",
+        tags=["operations"],
+        dependencies=[Depends(require_operator)],
+    )
+    def operations_metrics(request: Request) -> dict[str, Any]:
+        metrics = request.app.state.metrics.snapshot()
+        total = sum(item.count for item in metrics)
+        errors = sum(item.count for item in metrics if item.status_code >= 400)
+        failures = sum(item.count for item in metrics if item.status_code >= 500)
+        return {
+            "opentelemetry_enabled": request.app.state.opentelemetry_enabled,
+            "request_count": total,
+            "error_count": errors,
+            "error_rate": errors / total if total else 0.0,
+            "server_error_count": failures,
+            "server_error_rate": failures / total if total else 0.0,
+            "series": [
+                {
+                    "method": item.method,
+                    "path": item.path,
+                    "status_code": item.status_code,
+                    "count": item.count,
+                    "duration_seconds_sum": item.duration_seconds_sum,
+                    "duration_seconds_max": item.duration_seconds_max,
+                }
+                for item in metrics
+            ],
+        }
 
     @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
     def dashboard() -> str:
