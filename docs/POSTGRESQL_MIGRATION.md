@@ -18,8 +18,8 @@ FundOS 当前运行时仍使用 SQLite。仓库已经具备 PostgreSQL 16 本地
 6. **完整双环境自动验收（已完成）**：同一业务契约在 SQLite 和 PostgreSQL 验证
    投研、提案、风控、投委会、发布、净值、基准、调度锁和审计链；PostgreSQL
    另验证并发幂等和失败回滚；
-7. **切换与回退**：备份、停写、最终增量导入、切换连接、冒烟检查；失败则切回
-   SQLite 只读副本。
+7. **切换与回退（工具已完成，待实际演练）**：真正停写、最终迁移、一致性快照、
+   候选 API 只读冒烟和人工切换；开放 PostgreSQL 写入前失败则保持 SQLite。
 
 ## 启动预检数据库
 
@@ -81,3 +81,33 @@ python scripts/migrate_sqlite_to_postgres.py --confirm-writes-stopped
 完成。每张表都会比较行数和与顺序无关的 SHA-256 内容摘要；任何失败都会回滚整个
 目标导入。浮点列使用 `DOUBLE PRECISION`，避免 SQLite 双精度数据降为 PostgreSQL
 单精度。
+
+## 切换演练
+
+先让现有 SQLite API 进入真正的只读窗口。此模式在最外层拒绝所有修改请求，不会
+连带写入审计表：
+
+```powershell
+$env:FUNDOS_READ_ONLY = "true"
+# 重启当前 API，并确认 POST 请求返回 READ_ONLY_WINDOW / 503
+```
+
+完成最终备份和搬迁后，可在另一个端口启动同样只读的 PostgreSQL 候选实例，再运行：
+
+```powershell
+python scripts/drill_postgres_cutover.py `
+  --confirm-writes-stopped `
+  --candidate-api-url http://127.0.0.1:8001
+```
+
+演练会比较 schema 版本、表集合、逐表行数、逐表 SHA-256、审计链，并检查产品、
+已发布版本、组合/基准净值、调度和管道记录。候选 API 只调用 `/health`、
+`/products` 和 `/dashboard` 三个只读端点。任一检查失败，结论都是
+`remain_on_sqlite`，且工具不会修改 `FUNDOS_DATABASE_URL`。
+
+全部通过后才能由运维显式设置 `FUNDOS_DATABASE_URL` 并重启正式实例。先保持
+`FUNDOS_READ_ONLY=true` 完成入口冒烟，确认后再开放写入。
+
+回退边界必须明确：在 PostgreSQL 开放写入之前，可以直接恢复 SQLite 入口；一旦
+PostgreSQL 已产生新业务写入，不能直接切回旧 SQLite，否则会丢数据，必须先执行反向
+数据同步或进入新的停写迁移窗口。

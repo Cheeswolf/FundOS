@@ -6,6 +6,7 @@ services:
     environment:
       FUNDOS_DB_PATH: /app/data/fundos.sqlite3
       FUNDOS_DATABASE_URL: ${FUNDOS_DATABASE_URL:-}
+      FUNDOS_READ_ONLY: ${FUNDOS_READ_ONLY:-false}
       FUNDOS_API_KEY: ${FUNDOS_API_KEY:-}
       FUNDOS_API_KEYS_JSON: ${FUNDOS_API_KEYS_JSON:-}
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}

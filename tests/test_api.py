@@ -361,6 +361,42 @@ class ApiTests(unittest.TestCase):
         ])
         self.assertEqual(response.status_code, 401)
 
+    def test_read_only_window_allows_reads_and_blocks_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(
+                Path(directory) / "read-only.sqlite3",
+                api_key="test-secret",
+                read_only=True,
+            )
+            with TestClient(app) as client:
+                health = client.get("/health")
+                blocked = client.post(
+                    "/assets",
+                    headers={"X-API-Key": "test-secret"},
+                    json=[
+                        {
+                            "symbol": "BLOCKED",
+                            "name": "Blocked",
+                            "asset_class": "cash",
+                        }
+                    ],
+                )
+
+            self.assertEqual(health.status_code, 200)
+            self.assertEqual(blocked.status_code, 503)
+            self.assertEqual(blocked.json()["error"]["code"], "READ_ONLY_WINDOW")
+            self.assertEqual(blocked.headers["Retry-After"], "60")
+            self.assertEqual(
+                app.state.database.fetch_all(
+                    "SELECT * FROM assets WHERE symbol = 'BLOCKED'"
+                ),
+                [],
+            )
+            self.assertEqual(
+                app.state.database.fetch_all("SELECT * FROM api_audit_events"),
+                [],
+            )
+
     def test_role_scoped_keys_separate_operations_from_admin_actions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             role_app = create_app(

@@ -185,6 +185,7 @@ def create_app(
     database_url: str | None = None,
     api_key: str | None = None,
     api_keys: dict[str, str] | None = None,
+    read_only: bool | None = None,
 ) -> FastAPI:
     if database_path is not None and database_url is not None:
         raise ValueError("database_path and database_url cannot both be configured")
@@ -217,6 +218,12 @@ def create_app(
     app.state.database = database
     app.state.metrics = MetricsRegistry()
     app.state.opentelemetry_enabled = configure_opentelemetry()
+    if read_only is None:
+        read_only_value = os.environ.get("FUNDOS_READ_ONLY", "").strip().lower()
+        if read_only_value not in {"", "0", "1", "false", "true"}:
+            raise ValueError("FUNDOS_READ_ONLY must be true/false or 1/0")
+        read_only = read_only_value in {"1", "true"}
+    app.state.read_only = read_only
     configured_keys = dict(api_keys or {})
     if api_keys is None:
         serialized_keys = os.environ.get("FUNDOS_API_KEYS_JSON", "").strip()
@@ -348,6 +355,26 @@ def create_app(
                 "client_ip": request.client.host if request.client else None,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
+
+    @app.middleware("http")
+    async def enforce_read_only_window(request: Request, call_next):
+        if app.state.read_only and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
+            request.state.request_id = request_id
+            return JSONResponse(
+                status_code=503,
+                headers={"Retry-After": "60", "X-Request-ID": request_id},
+                content={
+                    "detail": "service is in a controlled read-only window",
+                    "error": {
+                        "code": "READ_ONLY_WINDOW",
+                        "message": "service is in a controlled read-only window",
+                        "request_id": request_id,
+                        "issues": [],
+                    },
+                },
+            )
+        return await call_next(request)
 
     def require_role(minimum_role: str):
         required_level = {"operator": 1, "admin": 2}[minimum_role]

@@ -36,6 +36,9 @@
 - [ ] SQLite 已备份，API 与调度写入已停止；
 - [ ] 搬迁报告中所有表的数量和 SHA-256 摘要验证通过；
 - [ ] PostgreSQL identity 序列已校正；
+- [ ] SQLite API 已设置 `FUNDOS_READ_ONLY=true`，且拒绝写入时审计表也不变化；
+- [ ] `drill_postgres_cutover.py` 返回 `ready_for_manual_cutover`；
+- [ ] 候选 PostgreSQL API 的三个只读冒烟端点通过；
 - [ ] `FUNDOS_DATABASE_URL` 仅在数据搬迁和回退演练完成后切换；
 - [ ] 生产连接启用 TLS；
 - [ ] 数据迁移、核对、切换和回退演练全部完成后才允许多实例运行。

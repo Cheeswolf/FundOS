@@ -176,3 +176,18 @@ class PostgresDatabase(Database):
             (table_name,),
         )
         return [str(row["column_name"]) for row in rows]
+
+    def list_tables(self) -> list[str]:
+        return [
+            str(row["table_name"])
+            for row in self.fetch_all(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_type = 'BASE TABLE'
+                  AND table_name <> 'schema_migrations'
+                ORDER BY table_name
+                """
+            )
+        ]

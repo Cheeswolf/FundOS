@@ -16,6 +16,7 @@ from fundos.api.main import _idempotent  # noqa: E402
 from fundos.domain import Asset, PortfolioProduct  # noqa: E402
 from fundos.storage import Database  # noqa: E402
 from fundos.storage.data_migration import migrate_sqlite_to_postgres  # noqa: E402
+from fundos.storage.cutover import drill_cutover  # noqa: E402
 
 
 POSTGRES_URL = os.environ.get("FUNDOS_TEST_POSTGRES_URL", "").strip()
@@ -54,10 +55,12 @@ class PostgresApiIntegrationTests(unittest.TestCase):
                 source,
                 self.app.state.database,
             )
+            drill = drill_cutover(source, self.app.state.database)
 
         self.assertEqual(report.source_schema_version, 14)
         self.assertEqual(report.target_schema_version, 14)
         self.assertGreater(report.total_rows, 0)
+        self.assertTrue(drill.ready)
         migrated = self.client.get("/products/migrated-product")
         self.assertEqual(migrated.status_code, 200, migrated.text)
         self.assertEqual(

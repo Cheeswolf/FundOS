@@ -437,6 +437,19 @@ class Database:
             for row in self.fetch_all(f"PRAGMA table_info({table_name})")
         ]
 
+    def list_tables(self) -> list[str]:
+        return [
+            str(row["name"])
+            for row in self.fetch_all(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                  AND name NOT IN ('schema_migrations', 'sqlite_sequence')
+                ORDER BY name
+                """
+            )
+        ]
+
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]
         with self.connect() as connection:
