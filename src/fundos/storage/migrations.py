@@ -290,6 +290,14 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def index_raw_evidence_review_queue(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_raw_evidence_review_published
+            ON raw_research_evidence (review_status, published_at)
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -305,6 +313,7 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(12, "add_scheduled_job_control", add_scheduled_job_control),
         Migration(13, "add_committee_opinions", add_committee_opinions),
         Migration(14, "add_benchmark_nav", add_benchmark_nav),
+        Migration(15, "index_raw_evidence_review_queue", index_raw_evidence_review_queue),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

@@ -9,8 +9,8 @@ FundOS 当前运行时仍使用 SQLite。仓库已经具备 PostgreSQL 16 本地
 1. **目标环境预检（已完成）**：固定 PostgreSQL 16，检查连接、版本、SSL 和建表权限；
 2. **兼容存储层（已完成）**：DB-API 连接、`?` 参数、完整性异常、时间表达式、
    元数据查询、identity 主键返回和幂等事务锁均已抽象；
-3. **正式迁移基线（已完成）**：当前完整结构转换为 PostgreSQL DDL，按逻辑版本
-   14 事务执行并写入 `schema_migrations`；后续结构变化继续追加迁移；
+3. **版本化迁移与回滚（已完成）**：版本 14 为完整基线；版本 15 是独立、可逆的
+   研究证据审核索引迁移。迁移账本记录名称和 SHA-256，内容被修改时拒绝执行；
 4. **API 连接与基础验收（已完成）**：`FUNDOS_DATABASE_URL` 选择数据库；CI 在
    PostgreSQL 16 上验证建表、API 写入、原子幂等和读取；
 5. **数据搬迁（工具已完成，待实际执行）**：停写后锁定 SQLite，按外键顺序在单一
@@ -51,6 +51,24 @@ python scripts/initialize_postgres.py
 当前 `PostgresDatabase` 已能为共用查询转换参数、管理提交/回滚，并为同一幂等键
 取得事务级 advisory lock。`initialize()` 会在一个事务中幂等应用 PostgreSQL
 schema 基线；执行失败时不会留下部分建表结果。
+
+当前 schema 版本为 15。升级：
+
+```powershell
+python scripts/migrate_postgres_schema.py --target-version 15
+```
+
+回滚版本 15 前必须先创建并验证原生备份，然后显式确认：
+
+```powershell
+python scripts/migrate_postgres_schema.py `
+  --target-version 14 `
+  --confirm-rollback
+```
+
+版本 15 的回滚只删除新增索引，不删除业务数据，可以随后重新升级。版本 14 是不可逆
+基线，工具拒绝回滚至更低版本。已应用迁移的名称或校验和不匹配时，升级和启动都会
+中止，不能通过修改迁移历史绕过。
 
 API 现在读取 `FUNDOS_DATABASE_URL`。留空时继续使用 `FUNDOS_DB_PATH` 指向的
 SQLite；配置 `postgresql://...` 时使用 PostgreSQL。`FUNDOS_POSTGRES_URL` 仍只供

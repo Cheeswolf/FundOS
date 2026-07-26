@@ -27,7 +27,7 @@ class FakeDatabase:
         self.restored = False
 
     def get_schema_version(self):
-        return 14
+        return 15
 
     def list_tables(self):
         if self.empty and not self.restored:
@@ -85,7 +85,7 @@ class PostgresBackupTests(unittest.TestCase):
             payload = json.loads(manifest.read_text(encoding="utf-8"))
 
         self.assertTrue(verification.valid)
-        self.assertEqual(verification.schema_version, 14)
+        self.assertEqual(verification.schema_version, 15)
         dump_command, options = runner.calls[1]
         self.assertNotIn("highly-sensitive-value", " ".join(dump_command))
         self.assertEqual(options["env"]["PGPASSWORD"], "highly-sensitive-value")

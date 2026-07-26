@@ -24,16 +24,30 @@ class Result:
 
 class MigrationConnection:
     def __init__(self):
-        self.versions = set()
+        self.records = {}
         self.calls = []
 
     def execute(self, query, parameters=()):
         self.calls.append((query, parameters))
         normalized = " ".join(query.split()).lower()
-        if normalized.startswith("select version from schema_migrations"):
-            return Result([{"version": version} for version in sorted(self.versions)])
+        if normalized.startswith("select version, name, checksum from schema_migrations"):
+            return Result([
+                {
+                    "version": version,
+                    "name": self.records[version]["name"],
+                    "checksum": self.records[version]["checksum"],
+                }
+                for version in sorted(self.records)
+            ])
         if normalized.startswith("insert into schema_migrations"):
-            self.versions.add(parameters[0])
+            self.records[parameters[0]] = {
+                "name": parameters[1],
+                "checksum": parameters[2],
+            }
+        if normalized.startswith("update schema_migrations set checksum"):
+            self.records[parameters[1]]["checksum"] = parameters[0]
+        if normalized.startswith("delete from schema_migrations"):
+            del self.records[parameters[0]]
         return Result()
 
 
@@ -48,13 +62,17 @@ class PostgresMigrationTests(unittest.TestCase):
         self.assertIn("DOUBLE PRECISION", converted)
         self.assertIn("CREATE TABLE IF NOT EXISTS benchmark_nav", converted)
 
-    def test_builds_version_14_baseline_with_individual_statements(self) -> None:
+    def test_builds_baseline_and_reversible_version_15(self) -> None:
         migrations = postgres_migrations(SCHEMA)
 
-        self.assertEqual(len(migrations), 1)
+        self.assertEqual(len(migrations), 2)
         self.assertEqual(migrations[0].version, POSTGRES_BASELINE_VERSION)
         self.assertGreater(len(migrations[0].statements), 30)
         self.assertTrue(all(";" not in statement for statement in migrations[0].statements))
+        self.assertNotIn("idx_raw_evidence_review_published", "\n".join(migrations[0].statements))
+        self.assertEqual(migrations[1].version, 15)
+        self.assertTrue(migrations[1].reversible)
+        self.assertEqual(len(migrations[1].checksum), 64)
 
     def test_applies_baseline_idempotently(self) -> None:
         connection = MigrationConnection()
@@ -63,11 +81,55 @@ class PostgresMigrationTests(unittest.TestCase):
         calls_after_first = len(connection.calls)
         second = apply_postgres_migrations(connection, SCHEMA)
 
-        self.assertEqual(first, POSTGRES_BASELINE_VERSION)
-        self.assertEqual(second, POSTGRES_BASELINE_VERSION)
-        self.assertEqual(connection.versions, {POSTGRES_BASELINE_VERSION})
+        self.assertEqual(first, 15)
+        self.assertEqual(second, 15)
+        self.assertEqual(set(connection.records), {POSTGRES_BASELINE_VERSION, 15})
         second_run_calls = connection.calls[calls_after_first:]
-        self.assertEqual(len(second_run_calls), 2)
+        self.assertEqual(len(second_run_calls), 3)
+
+    def test_rolls_version_15_back_and_can_reapply_it(self) -> None:
+        connection = MigrationConnection()
+        apply_postgres_migrations(connection, SCHEMA)
+
+        rolled_back = apply_postgres_migrations(
+            connection,
+            SCHEMA,
+            target_version=14,
+        )
+        upgraded = apply_postgres_migrations(connection, SCHEMA)
+
+        self.assertEqual(rolled_back, 14)
+        self.assertEqual(upgraded, 15)
+        self.assertIn(15, connection.records)
+        self.assertTrue(any(
+            "drop index if exists idx_raw_evidence_review_published" in
+            " ".join(query.split()).lower()
+            for query, _ in connection.calls
+        ))
+
+    def test_rejects_changed_applied_migration(self) -> None:
+        connection = MigrationConnection()
+        apply_postgres_migrations(connection, SCHEMA)
+        connection.records[15]["checksum"] = "tampered"
+
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            apply_postgres_migrations(connection, SCHEMA)
+
+    def test_adopts_checksum_for_existing_baseline_ledger(self) -> None:
+        connection = MigrationConnection()
+        connection.records[14] = {
+            "name": "baseline_current_schema",
+            "checksum": None,
+        }
+
+        applied = apply_postgres_migrations(
+            connection,
+            SCHEMA,
+            target_version=14,
+        )
+
+        self.assertEqual(applied, 14)
+        self.assertEqual(len(connection.records[14]["checksum"]), 64)
 
     def test_statement_splitter_preserves_semicolons_in_strings(self) -> None:
         statements = split_sql_statements(

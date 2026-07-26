@@ -57,10 +57,26 @@ class PostgresApiIntegrationTests(unittest.TestCase):
             )
             drill = drill_cutover(source, self.app.state.database)
 
-        self.assertEqual(report.source_schema_version, 14)
-        self.assertEqual(report.target_schema_version, 14)
+        self.assertEqual(report.source_schema_version, 15)
+        self.assertEqual(report.target_schema_version, 15)
         self.assertGreater(report.total_rows, 0)
         self.assertTrue(drill.ready)
+        self.assertEqual(
+            self.app.state.database.migrate_to_version(14),
+            14,
+        )
+        index_count = self.app.state.database.fetch_all(
+            """
+            SELECT COUNT(*) AS count FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname = 'idx_raw_evidence_review_published'
+            """
+        )[0]["count"]
+        self.assertEqual(index_count, 0)
+        self.assertEqual(
+            self.app.state.database.migrate_to_version(15),
+            15,
+        )
         migrated = self.client.get("/products/migrated-product")
         self.assertEqual(migrated.status_code, 200, migrated.text)
         self.assertEqual(

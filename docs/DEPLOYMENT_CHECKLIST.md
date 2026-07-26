@@ -23,7 +23,9 @@
 - [ ] 已生成可恢复的数据库备份；
 - [ ] 备份与生产文件不在同一故障域；
 - [ ] PostgreSQL 原生备份 SHA-256 校验通过，并已恢复到空临时数据库；
-- [ ] 启动后确认 schema version 为 14；
+- [ ] 启动后确认 schema version 为 15；
+- [ ] 增量迁移名称和 SHA-256 校验通过；
+- [ ] 回滚命令仅在已验证原生备份后演练；
 - [ ] 检查产品、组合版本和净值记录数量；
 - [ ] 已演练一次恢复到新数据库路径。
 
@@ -32,7 +34,7 @@
 - [ ] 已阅读 `docs/POSTGRESQL_MIGRATION.md`，且没有误将预检能力视为运行时支持；
 - [ ] PostgreSQL 主版本为 16；
 - [ ] `python scripts/check_postgres.py` 返回 `ready: true`；
-- [ ] `python scripts/initialize_postgres.py` 完成且 schema version 为 14；
+- [ ] `python scripts/initialize_postgres.py` 完成且 schema version 为 15；
 - [ ] CI `postgres-integration` 作业通过；
 - [ ] PostgreSQL 完整业务契约、并发幂等和失败回滚用例通过；
 - [ ] SQLite 已备份，API 与调度写入已停止；

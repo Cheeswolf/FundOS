@@ -7,6 +7,7 @@ from typing import Mapping
 from fundos.services.audit_log import verify_audit_chain
 from fundos.storage import Database, verify_database_backup
 from fundos.storage.postgres_backup import verify_postgres_backup
+from fundos.storage.versions import CURRENT_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,9 +65,9 @@ def run_deployment_preflight(
     else:
         checks.append(_check(
             "schema_version",
-            schema_version == 14,
+            schema_version == CURRENT_SCHEMA_VERSION,
             "blocking",
-            f"schema version is {schema_version}; expected 14",
+            f"schema version is {schema_version}; expected {CURRENT_SCHEMA_VERSION}",
         ))
         audit = verify_audit_chain(database)
         checks.append(_check(

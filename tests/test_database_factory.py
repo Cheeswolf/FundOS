@@ -45,7 +45,7 @@ class DatabaseFactoryTests(unittest.TestCase):
             )
 
             self.assertEqual(app.state.database.path, str(path))
-            self.assertEqual(app.state.database.get_schema_version(), 14)
+            self.assertEqual(app.state.database.get_schema_version(), 15)
 
     def test_api_rejects_conflicting_path_and_url(self) -> None:
         with self.assertRaisesRegex(ValueError, "cannot both"):

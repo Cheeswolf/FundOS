@@ -392,6 +392,9 @@ CREATE TABLE IF NOT EXISTS audit_retention_anchors (
     deleted_count INTEGER NOT NULL CHECK (deleted_count > 0),
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_raw_evidence_review_published
+ON raw_research_evidence (review_status, published_at);
 """
 
 

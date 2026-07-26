@@ -152,11 +152,23 @@ class PostgresDatabase(Database):
             raw_connection.close()
 
     def initialize(self) -> None:
+        self.migrate_to_version()
+
+    def migrate_to_version(self, target_version: int | None = None) -> int:
         from fundos.storage.database import SCHEMA
         from fundos.storage.postgres_migrations import apply_postgres_migrations
+        from fundos.storage.versions import CURRENT_SCHEMA_VERSION
 
         with self.connect() as connection:
-            apply_postgres_migrations(connection, SCHEMA)
+            return apply_postgres_migrations(
+                connection,
+                SCHEMA,
+                target_version=(
+                    CURRENT_SCHEMA_VERSION
+                    if target_version is None
+                    else target_version
+                ),
+            )
 
     def begin_idempotent_write(
         self,
