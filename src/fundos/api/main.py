@@ -144,20 +144,25 @@ def _idempotent(
     action,
 ) -> dict[str, Any]:
     if not key:
-        return action()
+        return action(None)
     request_hash = sha256(
         json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-    existing = database.fetch_all(
-        "SELECT * FROM idempotency_records WHERE idempotency_key = ?", (key,)
-    )
-    if existing:
-        if existing[0]["operation"] != operation or existing[0]["request_hash"] != request_hash:
-            raise HTTPException(status_code=409, detail="idempotency key was already used for another request")
-        return json.loads(existing[0]["response_json"])
-    result = action()
     try:
         with database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM idempotency_records WHERE idempotency_key = ?",
+                (key,),
+            ).fetchone()
+            if existing:
+                if existing["operation"] != operation or existing["request_hash"] != request_hash:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="idempotency key was already used for another request",
+                    )
+                return json.loads(existing["response_json"])
+            result = action(connection)
             connection.execute(
                 """
                 INSERT INTO idempotency_records
@@ -434,8 +439,12 @@ def create_app(
                 key=idempotency_key,
                 operation="create_product",
                 payload=payload.dict(),
-                action=lambda: (
-                    db.create_product_with_mandate(product, mandate)
+                action=lambda connection: (
+                    db.create_product_with_mandate(
+                        product,
+                        mandate,
+                        connection=connection,
+                    )
                     or {"product_id": payload.product_id}
                 ),
             )
@@ -581,8 +590,12 @@ def create_app(
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         db: Database = Depends(get_database),
     ) -> dict[str, Any]:
-        def action() -> dict[str, Any]:
-            result = publish_approved_workflow(db, run_id=run_id)
+        def action(connection: sqlite3.Connection | None) -> dict[str, Any]:
+            result = publish_approved_workflow(
+                db,
+                run_id=run_id,
+                connection=connection,
+            )
             return {
                 "run_id": run_id,
                 "version_id": result.version_id,

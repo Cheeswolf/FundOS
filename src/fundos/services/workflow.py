@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 import json
+import sqlite3
 from typing import Mapping
 from uuid import uuid4
 
@@ -311,22 +312,42 @@ def record_committee_decision(
         return decision
 
 
-def publish_approved_workflow(database: Database, *, run_id: str) -> PublicationResult:
-    run = database.fetch_all("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id,))
-    if not run:
+def publish_approved_workflow(
+    database: Database,
+    *,
+    run_id: str,
+    connection: sqlite3.Connection | None = None,
+) -> PublicationResult:
+    if connection is None:
+        with database.connect() as owned_connection:
+            return publish_approved_workflow(
+                database,
+                run_id=run_id,
+                connection=owned_connection,
+            )
+    run = connection.execute(
+        "SELECT * FROM workflow_runs WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if run is None:
         raise ValueError("workflow run does not exist")
-    if run[0]["state"] != "approved":
+    if run["state"] != "approved":
         raise ValueError("publication requires committee approval")
-    decision = database.fetch_all("SELECT * FROM committee_decisions WHERE run_id = ?", (run_id,))[0]
+    decision = connection.execute(
+        "SELECT * FROM committee_decisions WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if decision is None:
+        raise ValueError("committee decision does not exist")
     result = publish_portfolio_version(
         database,
-        version_id=run[0]["version_id"],
+        version_id=run["version_id"],
         reason=decision["rationale"],
         approved_by=decision["decided_by"],
+        connection=connection,
     )
-    with database.connect() as connection:
-        connection.execute(
-            "UPDATE workflow_runs SET state = 'published', updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
-            (run_id,),
-        )
+    connection.execute(
+        "UPDATE workflow_runs SET state = 'published', updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
+        (run_id,),
+    )
     return result

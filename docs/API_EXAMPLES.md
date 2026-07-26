@@ -203,7 +203,9 @@ Invoke-RestMethod "$baseUrl/research/research-2026w30/finalize" `
 仪表盘“决策操作”页提供同一受控流程的操作入口。API Key 仅保存在页面内存，
 通过 `X-API-Key` 请求头发送；刷新页面后清空。研究定稿、创建提案和风险审查
 需要 operator 权限，投委会决策和发布需要 admin 权限。发布动作仍使用
-`Idempotency-Key` 防止重复提交。
+`Idempotency-Key` 防止重复提交。产品创建或组合发布的业务变更与幂等响应在同一
+数据库事务内提交；并发使用相同键和相同请求会获得同一响应，复用相同键提交不同
+请求则返回 `409`。
 
 计划任务状态包括 `running`、`succeeded`、`failed`、`skipped` 和
 `abandoned`。活动租约响应包含 `active` 布尔值，但不暴露内部 owner ID。
