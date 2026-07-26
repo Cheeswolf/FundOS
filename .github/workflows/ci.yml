@@ -96,6 +96,8 @@ jobs:
 
       - name: Install PostgreSQL test dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
           python -m pip install --upgrade pip
           python -m pip install -e ".[test,postgres]"
 
@@ -105,3 +107,14 @@ jobs:
           tests.test_postgres_integration
           tests.test_database_contract.PostgresDatabaseContractTests
           -v
+
+      - name: Drill native PostgreSQL backup and restore
+        env:
+          PGPASSWORD: postgres-test-password
+          FUNDOS_DATABASE_URL: postgresql://fundos:postgres-test-password@127.0.0.1:5432/fundos_test
+          FUNDOS_RESTORE_DATABASE_URL: postgresql://fundos:postgres-test-password@127.0.0.1:5432/fundos_restore
+        run: |
+          python scripts/backup_postgres.py --destination /tmp/fundos-backups
+          createdb --host=127.0.0.1 --port=5432 --username=fundos fundos_restore
+          backup_file="$(find /tmp/fundos-backups -name '*.dump' -type f -print -quit)"
+          python scripts/drill_postgres_restore.py "$backup_file" --confirm-empty-target

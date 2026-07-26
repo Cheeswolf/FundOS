@@ -6,6 +6,7 @@ from typing import Mapping
 
 from fundos.services.audit_log import verify_audit_chain
 from fundos.storage import Database, verify_database_backup
+from fundos.storage.postgres_backup import verify_postgres_backup
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,7 +173,11 @@ def _backup_check(
                 f"backup backend is {backend}; expected {expected_backend}"
             )
         backup = manifest_path.parent / str(manifest["backup_file"])
-        verification = verify_database_backup(backup, manifest_path)
+        verification = (
+            verify_postgres_backup(backup, manifest_path)
+            if backend == "postgresql"
+            else verify_database_backup(backup, manifest_path)
+        )
         created_at = datetime.fromisoformat(str(manifest["created_at"]))
         if created_at.tzinfo is None:
             raise ValueError("backup created_at must include timezone")

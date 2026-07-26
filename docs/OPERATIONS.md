@@ -121,6 +121,30 @@ SQLite 备份只可作为 SQLite 正式运行或 PostgreSQL 切换窗口的回�
 已开放写入的 PostgreSQL 具备可恢复备份。PostgreSQL 正式生产预检会因此阻断，直到
 配置并验证 PostgreSQL 原生备份。
 
+### PostgreSQL 备份与恢复演练
+
+主库使用 PostgreSQL 后，创建 custom-format 原生备份：
+
+```powershell
+python scripts/backup_postgres.py
+```
+
+工具调用 `pg_dump`，生成 `.dump` 与 `.manifest.json`，记录 schema、逐表数量、
+文件大小和 SHA-256。密码只通过 `PGPASSWORD` 子进程环境传递，不写入命令参数或
+清单。
+
+由管理员预先创建一个完全空的临时数据库，然后恢复演练：
+
+```powershell
+$env:FUNDOS_RESTORE_DATABASE_URL = "postgresql://..."
+python scripts/drill_postgres_restore.py `
+  backups\postgresql\<backup>.dump `
+  --confirm-empty-target
+```
+
+工具不会创建、清空或删除数据库，也不使用 `pg_restore --clean`。恢复后必须与清单
+中的 schema 版本和逐表数量完全一致。
+
 ### 每日
 
 1. 同步行情；
