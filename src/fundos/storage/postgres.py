@@ -150,10 +150,11 @@ class PostgresDatabase(Database):
             raw_connection.close()
 
     def initialize(self) -> None:
-        raise RuntimeError(
-            "PostgreSQL schema migrations are not installed yet; "
-            "run only the readiness check at this stage"
-        )
+        from fundos.storage.database import SCHEMA
+        from fundos.storage.postgres_migrations import apply_postgres_migrations
+
+        with self.connect() as connection:
+            apply_postgres_migrations(connection, SCHEMA)
 
     def begin_idempotent_write(
         self,

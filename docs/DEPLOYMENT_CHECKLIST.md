@@ -30,6 +30,7 @@
 - [ ] 已阅读 `docs/POSTGRESQL_MIGRATION.md`，且没有误将预检能力视为运行时支持；
 - [ ] PostgreSQL 主版本为 16；
 - [ ] `python scripts/check_postgres.py` 返回 `ready: true`；
+- [ ] `python scripts/initialize_postgres.py` 完成且 schema version 为 14；
 - [ ] 生产连接启用 TLS；
 - [ ] 数据迁移、核对、切换和回退演练全部完成后才允许多实例运行。
 

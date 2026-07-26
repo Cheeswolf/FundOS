@@ -124,12 +124,6 @@ class PostgresReadinessTests(unittest.TestCase):
         self.assertTrue(raw.committed)
         self.assertTrue(raw.closed)
 
-    def test_postgres_schema_initialization_is_explicitly_blocked(self) -> None:
-        database = PostgresDatabase("postgresql://localhost/fundos")
-
-        with self.assertRaisesRegex(RuntimeError, "schema migrations"):
-            database.initialize()
-
     def test_adapter_translates_batch_queries(self) -> None:
         class RawConnection:
             def executemany(self, query, parameters):
