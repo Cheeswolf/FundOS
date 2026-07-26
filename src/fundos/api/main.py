@@ -282,6 +282,21 @@ def create_app(
             raise _domain_error(error) from error
         return {"report_id": payload.report_id, "status": "final" if payload.finalize else "draft"}
 
+    @app.post(
+        "/research/{report_id}/finalize",
+        tags=["research"],
+        dependencies=[Depends(require_operator)],
+    )
+    def finalize_research(
+        report_id: str,
+        db: Database = Depends(get_database),
+    ) -> dict[str, str]:
+        try:
+            finalize_research_report(db, report_id=report_id)
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"report_id": report_id, "status": "final"}
+
     @app.post("/proposals", status_code=201, tags=["workflow"], dependencies=[Depends(require_operator)])
     def create_portfolio_proposal(payload: ProposalCreate, db: Database = Depends(get_database)) -> dict[str, str]:
         try:

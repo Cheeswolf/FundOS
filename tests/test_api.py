@@ -42,6 +42,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn("历史模拟业绩", response.text)
         self.assertIn("运行监控", response.text)
         self.assertIn("/scheduled-jobs/runs", response.text)
+        self.assertIn("决策操作", response.text)
+        self.assertIn("proposalForm", response.text)
+        self.assertIn("/committee-decision", response.text)
+        self.assertIn("Idempotency-Key", response.text)
 
     def test_lists_and_gets_product(self) -> None:
         self.app.state.database.create_product(
@@ -410,6 +414,43 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(repeated_publish.json(), published.json())
         workflow = self.client.get("/workflows/RUN1").json()
         self.assertEqual(workflow["run"]["state"], "published")
+
+    def test_operator_can_finalize_draft_research(self) -> None:
+        self.client.post("/assets", headers=self.write_headers, json=[
+            {"symbol": "EQUITY", "name": "Equity", "asset_class": "equity"},
+        ])
+        self.app.state.database.create_product(
+            PortfolioProduct("P1", "Portfolio", "BM", datetime.now())
+        )
+        created = self.client.post("/research", headers=self.write_headers, json={
+            "report_id": "DRAFT1",
+            "product_id": "P1",
+            "as_of_date": "2026-07-01",
+            "market_regime": "neutral",
+            "summary": "Draft research.",
+            "confidence": 0.7,
+            "evidence": [{
+                "evidence_id": "E1",
+                "title": "Evidence",
+                "source": "fixture",
+                "url": "https://example.test/evidence",
+                "published_at": "2026-07-01T00:00:00Z",
+            }],
+            "asset_views": [{
+                "asset_symbol": "EQUITY",
+                "direction": "neutral",
+                "confidence": 0.7,
+                "thesis": "Balanced.",
+                "evidence_ids": ["E1"],
+            }],
+            "finalize": False,
+        })
+        self.assertEqual(created.status_code, 201)
+        finalized = self.client.post(
+            "/research/DRAFT1/finalize", headers=self.write_headers,
+        )
+        self.assertEqual(finalized.status_code, 200)
+        self.assertEqual(finalized.json()["status"], "final")
 
 
 if __name__ == "__main__":

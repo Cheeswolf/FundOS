@@ -176,6 +176,18 @@ Invoke-RestMethod "$baseUrl/scheduled-jobs/locks"
 Invoke-RestMethod "$baseUrl/alerts?status=failed"
 ```
 
+研究报告以草稿创建时，可由 operator 定稿：
+
+```powershell
+Invoke-RestMethod "$baseUrl/research/research-2026w30/finalize" `
+  -Method Post -Headers $headers
+```
+
+仪表盘“决策操作”页提供同一受控流程的操作入口。API Key 仅保存在页面内存，
+通过 `X-API-Key` 请求头发送；刷新页面后清空。研究定稿、创建提案和风险审查
+需要 operator 权限，投委会决策和发布需要 admin 权限。发布动作仍使用
+`Idempotency-Key` 防止重复提交。
+
 计划任务状态包括 `running`、`succeeded`、`failed`、`skipped` 和
 `abandoned`。活动租约响应包含 `active` 布尔值，但不暴露内部 owner ID。
 
