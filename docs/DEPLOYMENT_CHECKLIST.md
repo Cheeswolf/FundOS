@@ -25,6 +25,14 @@
 - [ ] 检查产品、组合版本和净值记录数量；
 - [ ] 已演练一次恢复到新数据库路径。
 
+如准备迁移 PostgreSQL：
+
+- [ ] 已阅读 `docs/POSTGRESQL_MIGRATION.md`，且没有误将预检能力视为运行时支持；
+- [ ] PostgreSQL 主版本为 16；
+- [ ] `python scripts/check_postgres.py` 返回 `ready: true`；
+- [ ] 生产连接启用 TLS；
+- [ ] 数据迁移、核对、切换和回退演练全部完成后才允许多实例运行。
+
 ## 网络与安全
 
 - [ ] 生产入口启用 HTTPS；
