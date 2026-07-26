@@ -29,9 +29,61 @@ class ApiTests(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     def test_health(self) -> None:
-        response = self.client.get("/health")
+        response = self.client.get(
+            "/health", headers={"X-Request-ID": "health-request-1"},
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(response.headers["X-Request-ID"], "health-request-1")
+
+    def test_errors_have_stable_code_message_and_request_id(self) -> None:
+        unauthorized = self.client.post(
+            "/assets",
+            headers={"X-Request-ID": "auth-request-1"},
+            json=[{"symbol": "A", "name": "A", "asset_class": "equity"}],
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(
+            unauthorized.json()["error"],
+            {
+                "code": "AUTHENTICATION_REQUIRED",
+                "message": "invalid or missing API key",
+                "request_id": "auth-request-1",
+                "issues": [],
+            },
+        )
+        self.assertEqual(unauthorized.json()["detail"], "invalid or missing API key")
+
+        domain = self.client.post(
+            "/research/missing/finalize",
+            headers={**self.write_headers, "X-Request-ID": "domain-request-1"},
+        )
+        self.assertEqual(domain.status_code, 422)
+        self.assertEqual(domain.json()["error"]["code"], "DOMAIN_RULE_VIOLATION")
+        self.assertEqual(domain.json()["error"]["request_id"], "domain-request-1")
+
+        validation = self.client.get(
+            "/pipeline-runs?limit=0",
+            headers={"X-Request-ID": "validation-request-1"},
+        )
+        self.assertEqual(validation.status_code, 422)
+        self.assertEqual(validation.json()["error"]["code"], "VALIDATION_ERROR")
+        self.assertTrue(validation.json()["error"]["issues"])
+
+    def test_openapi_declares_standard_error_model(self) -> None:
+        schema = self.client.get("/openapi.json").json()
+        self.assertIn("ApiErrorResponse", schema["components"]["schemas"])
+        self.assertIn("ScheduledJobRunResponse", schema["components"]["schemas"])
+        self.assertEqual(
+            schema["paths"]["/pipeline-runs"]["get"]["responses"]["422"]["content"]
+            ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ApiErrorResponse",
+        )
+        headers = schema["paths"]["/pipeline-runs"]["get"]["responses"]["200"]["headers"]
+        self.assertEqual(
+            set(headers),
+            {"X-Total-Count", "X-Limit", "X-Offset"},
+        )
 
     def test_dashboard_is_served(self) -> None:
         response = self.client.get("/dashboard")
@@ -99,6 +151,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(locks[0]["job_name"], "weekly-research")
         self.assertTrue(locks[0]["active"])
         self.assertNotIn("owner_id", locks[0])
+
+    def test_list_pagination_preserves_array_response_and_sets_metadata(self) -> None:
+        for index in range(3):
+            run_scheduled_job(
+                self.app.state.database,
+                job_name=f"job-{index}",
+                task=lambda: "done",
+            )
+        response = self.client.get("/scheduled-jobs/runs?limit=1&offset=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.headers["X-Total-Count"], "3")
+        self.assertEqual(response.headers["X-Limit"], "1")
+        self.assertEqual(response.headers["X-Offset"], "1")
 
     def test_rejects_invalid_scheduled_job_status_filter(self) -> None:
         response = self.client.get("/scheduled-jobs/runs?status=unknown")

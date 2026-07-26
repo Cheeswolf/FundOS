@@ -5,6 +5,39 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class ApiErrorDetail(BaseModel):
+    code: str
+    message: str
+    request_id: str
+    issues: list[dict] = Field(default_factory=list)
+
+
+class ApiErrorResponse(BaseModel):
+    detail: str
+    error: ApiErrorDetail
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok"]
+
+
+class ScheduledJobRunResponse(BaseModel):
+    run_id: str
+    job_name: str
+    status: Literal["running", "succeeded", "failed", "skipped", "abandoned"]
+    started_at: datetime
+    completed_at: datetime | None
+    lease_until: datetime
+    message: str | None
+
+
+class ScheduledJobLockResponse(BaseModel):
+    job_name: str
+    acquired_at: datetime
+    lease_until: datetime
+    active: bool
+
+
 class AssetInput(BaseModel):
     symbol: str = Field(min_length=1)
     name: str = Field(min_length=1)

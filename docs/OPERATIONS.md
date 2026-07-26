@@ -169,6 +169,10 @@ GET /products/{product_id}/operations
 `/scheduled-jobs/runs` 支持 `job_name`、`status` 和 `limit` 查询参数；对外结果
 不会返回内部租约持有者 ID。
 
+运行记录列表还支持 `offset`。响应头中的 `X-Total-Count`、`X-Limit` 和
+`X-Offset` 可用于构建分页界面，正文仍保持数组。所有错误响应都包含稳定错误码
+和 `request_id`，排障时应同时记录 HTTP 状态码、`error.code` 和请求 ID。
+
 ## 7. 故障处理
 
 ### 行情 API 限流

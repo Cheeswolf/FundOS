@@ -12,22 +12,27 @@ from typing import Any
 from uuid import uuid4
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from fundos.api.schemas import (
     AssetInput,
     ApprovedResearchRequestInput,
+    ApiErrorResponse,
     AlertLifecycleInput,
     CircuitResetInput,
     CommitteeDecisionInput,
     CommitteeOpinionInput,
     EvidenceReviewInput,
+    HealthResponse,
     PriceBatchInput,
     ProductCreate,
     ProposalCreate,
     ResearchCreate,
     RiskReviewInput,
+    ScheduledJobLockResponse,
+    ScheduledJobRunResponse,
 )
 from fundos.domain import (
     Asset,
@@ -59,6 +64,27 @@ from fundos.services import (
 from fundos.storage import Database
 
 
+PAGINATED_RESPONSE_DOCS = {
+    200: {
+        "description": "Successful array response with compatible pagination headers.",
+        "headers": {
+            "X-Total-Count": {
+                "description": "Total number of matching records.",
+                "schema": {"type": "integer"},
+            },
+            "X-Limit": {
+                "description": "Maximum records returned.",
+                "schema": {"type": "integer"},
+            },
+            "X-Offset": {
+                "description": "Number of matching records skipped.",
+                "schema": {"type": "integer"},
+            },
+        },
+    }
+}
+
+
 def _rows(rows: list[Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
@@ -83,8 +109,28 @@ def get_database(request: Request) -> Database:
 
 def _domain_error(error: Exception) -> HTTPException:
     if isinstance(error, sqlite3.IntegrityError):
-        return HTTPException(status_code=409, detail=str(error))
-    return HTTPException(status_code=422, detail=str(error))
+        return HTTPException(
+            status_code=409,
+            detail=str(error),
+            headers={"X-FundOS-Error-Code": "RESOURCE_CONFLICT"},
+        )
+    return HTTPException(
+        status_code=422,
+        detail=str(error),
+        headers={"X-FundOS-Error-Code": "DOMAIN_RULE_VIOLATION"},
+    )
+
+
+def _pagination_headers(
+    response: Response,
+    *,
+    total: int,
+    limit: int,
+    offset: int,
+) -> None:
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Limit"] = str(limit)
+    response.headers["X-Offset"] = str(offset)
 
 
 def _idempotent(
@@ -138,6 +184,10 @@ def create_app(
         title="FundOS API",
         version="0.1.0",
         description="Investment research and portfolio operating system API",
+        responses={
+            status: {"model": ApiErrorResponse}
+            for status in (401, 403, 404, 409, 422, 500)
+        },
     )
     app.state.database = database
     configured_keys = dict(api_keys or {})
@@ -159,21 +209,74 @@ def create_app(
         raise ValueError("API keys must be non-empty and roles must be operator or admin")
     app.state.api_keys = configured_keys
 
+    @app.exception_handler(HTTPException)
+    async def http_error_response(request: Request, error: HTTPException) -> JSONResponse:
+        default_codes = {
+            401: "AUTHENTICATION_REQUIRED",
+            403: "PERMISSION_DENIED",
+            404: "RESOURCE_NOT_FOUND",
+            409: "RESOURCE_CONFLICT",
+            422: "INVALID_REQUEST",
+        }
+        headers = dict(error.headers or {})
+        code = headers.pop(
+            "X-FundOS-Error-Code",
+            default_codes.get(error.status_code, "HTTP_ERROR"),
+        )
+        message = str(error.detail)
+        request_id = getattr(request.state, "request_id", str(uuid4()))
+        return JSONResponse(
+            status_code=error.status_code,
+            headers=headers,
+            content={
+                "detail": message,
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "request_id": request_id,
+                    "issues": [],
+                },
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_response(
+        request: Request,
+        error: RequestValidationError,
+    ) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", str(uuid4()))
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "request validation failed",
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "request validation failed",
+                    "request_id": request_id,
+                    "issues": error.errors(),
+                },
+            },
+        )
+
     @app.middleware("http")
     async def audit_mutating_requests(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
+        request.state.request_id = request_id
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-            return await call_next(request)
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
         supplied_key = request.headers.get("X-API-Key")
         request.state.actor_id = (
             f"key:{sha256(supplied_key.encode('utf-8')).hexdigest()[:12]}"
             if supplied_key else "anonymous"
         )
         request.state.actor_role = "unknown" if configured_keys else "development-admin"
-        request_id = request.headers.get("X-Request-ID", "").strip()[:128] or str(uuid4())
         status_code = 500
         try:
             response = await call_next(request)
             status_code = response.status_code
+            response.headers["X-Request-ID"] = request_id
             return response
         finally:
             outcome = "succeeded" if status_code < 400 else "rejected" if status_code < 500 else "failed"
@@ -211,7 +314,7 @@ def create_app(
     require_operator = require_role("operator")
     require_admin = require_role("admin")
 
-    @app.get("/health", tags=["system"])
+    @app.get("/health", tags=["system"], response_model=HealthResponse)
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
@@ -457,27 +560,43 @@ def create_app(
         ))
         return {"nav": nav, "snapshots": snapshots}
 
-    @app.get("/products/{product_id}/operations", tags=["operations"])
+    @app.get(
+        "/products/{product_id}/operations",
+        tags=["operations"],
+        responses=PAGINATED_RESPONSE_DOCS,
+    )
     def list_operations_cycles(
         product_id: str,
+        response: Response,
         limit: int = Query(default=30, ge=1, le=365),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
+        total = db.fetch_all(
+            "SELECT COUNT(*) AS count FROM operations_cycles WHERE product_id = ?",
+            (product_id,),
+        )[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
         return _rows(db.fetch_all(
             """
             SELECT * FROM operations_cycles
-            WHERE product_id = ? ORDER BY as_of_date DESC LIMIT ?
+            WHERE product_id = ? ORDER BY as_of_date DESC LIMIT ? OFFSET ?
             """,
-            (product_id, limit),
+            (product_id, limit, offset),
         ))
 
-    @app.get("/pipeline-runs", tags=["operations"])
+    @app.get("/pipeline-runs", tags=["operations"], responses=PAGINATED_RESPONSE_DOCS)
     def list_pipeline_runs(
+        response: Response,
         limit: int = Query(default=20, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
+        total = db.fetch_all("SELECT COUNT(*) AS count FROM pipeline_runs")[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
         runs = _rows(db.fetch_all(
-            "SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ))
         for run in runs:
             run["steps"] = _rows(db.fetch_all(
@@ -486,11 +605,18 @@ def create_app(
             ))
         return runs
 
-    @app.get("/scheduled-jobs/runs", tags=["operations"])
+    @app.get(
+        "/scheduled-jobs/runs",
+        tags=["operations"],
+        responses=PAGINATED_RESPONSE_DOCS,
+        response_model=list[ScheduledJobRunResponse],
+    )
     def list_scheduled_job_runs(
+        response: Response,
         job_name: str | None = Query(default=None, min_length=1),
         status: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
         allowed_statuses = {"running", "succeeded", "failed", "skipped", "abandoned"}
@@ -505,19 +631,29 @@ def create_app(
             conditions.append("status = ?")
             parameters.append(status)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        parameters.append(limit)
+        count_parameters = tuple(parameters)
+        total = db.fetch_all(
+            f"SELECT COUNT(*) AS count FROM scheduled_job_runs {where}",
+            count_parameters,
+        )[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
+        parameters.extend((limit, offset))
         return _rows(db.fetch_all(
             f"""
             SELECT run_id, job_name, status, started_at, completed_at,
                    lease_until, message
             FROM scheduled_job_runs
             {where}
-            ORDER BY started_at DESC LIMIT ?
+            ORDER BY started_at DESC LIMIT ? OFFSET ?
             """,
             tuple(parameters),
         ))
 
-    @app.get("/scheduled-jobs/locks", tags=["operations"])
+    @app.get(
+        "/scheduled-jobs/locks",
+        tags=["operations"],
+        response_model=list[ScheduledJobLockResponse],
+    )
     def list_scheduled_job_locks(
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
@@ -532,25 +668,34 @@ def create_app(
             item["active"] = datetime.fromisoformat(item["lease_until"]) > now
         return locks
 
-    @app.get("/alerts", tags=["operations"])
+    @app.get("/alerts", tags=["operations"], responses=PAGINATED_RESPONSE_DOCS)
     def list_alerts(
+        response: Response,
         status: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
         if status is not None and status not in {"pending", "delivered", "failed"}:
             raise HTTPException(status_code=422, detail="invalid alert status")
         if status:
+            total = db.fetch_all(
+                "SELECT COUNT(*) AS count FROM alert_events WHERE status = ?",
+                (status,),
+            )[0]["count"]
+            _pagination_headers(response, total=total, limit=limit, offset=offset)
             return _rows(db.fetch_all(
                 """SELECT a.*, l.state AS lifecycle_state, l.updated_by, l.note, l.updated_at
                 FROM alert_events a LEFT JOIN alert_lifecycle l ON l.alert_id = a.alert_id
-                WHERE a.status = ? ORDER BY a.created_at DESC LIMIT ?""",
-                (status, limit),
+                WHERE a.status = ? ORDER BY a.created_at DESC LIMIT ? OFFSET ?""",
+                (status, limit, offset),
             ))
+        total = db.fetch_all("SELECT COUNT(*) AS count FROM alert_events")[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
         return _rows(db.fetch_all(
             """SELECT a.*, l.state AS lifecycle_state, l.updated_by, l.note, l.updated_at
             FROM alert_events a LEFT JOIN alert_lifecycle l ON l.alert_id = a.alert_id
-            ORDER BY a.created_at DESC LIMIT ?""", (limit,)
+            ORDER BY a.created_at DESC LIMIT ? OFFSET ?""", (limit, offset)
         ))
 
     @app.post(
@@ -638,10 +783,12 @@ def create_app(
         result["period_days"] = days
         return result
 
-    @app.get("/model-calls", tags=["ai-operations"])
+    @app.get("/model-calls", tags=["ai-operations"], responses=PAGINATED_RESPONSE_DOCS)
     def list_model_calls(
+        response: Response,
         status: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
         if status is not None and status not in {"succeeded", "failed"}:
@@ -651,29 +798,52 @@ def create_app(
             input_tokens, output_tokens, estimated_cost_usd, error_message, created_at
         """
         if status:
+            total = db.fetch_all(
+                "SELECT COUNT(*) AS count FROM model_calls WHERE status = ?",
+                (status,),
+            )[0]["count"]
+            _pagination_headers(response, total=total, limit=limit, offset=offset)
             return _rows(db.fetch_all(
-                f"SELECT {columns} FROM model_calls WHERE status = ? ORDER BY created_at DESC LIMIT ?",
-                (status, limit),
+                f"SELECT {columns} FROM model_calls WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (status, limit, offset),
             ))
+        total = db.fetch_all("SELECT COUNT(*) AS count FROM model_calls")[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
         return _rows(db.fetch_all(
-            f"SELECT {columns} FROM model_calls ORDER BY created_at DESC LIMIT ?", (limit,)
+            f"SELECT {columns} FROM model_calls ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ))
 
-    @app.get("/audit-events", tags=["security"], dependencies=[Depends(require_admin)])
+    @app.get(
+        "/audit-events",
+        tags=["security"],
+        dependencies=[Depends(require_admin)],
+        responses=PAGINATED_RESPONSE_DOCS,
+    )
     def list_audit_events(
+        response: Response,
         outcome: str | None = Query(default=None),
         limit: int = Query(default=100, ge=1, le=1000),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
         if outcome is not None and outcome not in {"succeeded", "rejected", "failed"}:
             raise HTTPException(status_code=422, detail="invalid audit outcome")
         if outcome:
+            total = db.fetch_all(
+                "SELECT COUNT(*) AS count FROM api_audit_events WHERE outcome = ?",
+                (outcome,),
+            )[0]["count"]
+            _pagination_headers(response, total=total, limit=limit, offset=offset)
             return _rows(db.fetch_all(
-                "SELECT * FROM api_audit_events WHERE outcome = ? ORDER BY created_at DESC LIMIT ?",
-                (outcome, limit),
+                "SELECT * FROM api_audit_events WHERE outcome = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (outcome, limit, offset),
             ))
+        total = db.fetch_all("SELECT COUNT(*) AS count FROM api_audit_events")[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
         return _rows(db.fetch_all(
-            "SELECT * FROM api_audit_events ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM api_audit_events ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ))
 
     @app.get("/audit-events/integrity", tags=["security"], dependencies=[Depends(require_admin)])
@@ -719,10 +889,16 @@ def create_app(
         return reports
 
     @app.get(
-        "/research-evidence", tags=["research"], dependencies=[Depends(require_admin)],
+        "/research-evidence",
+        tags=["research"],
+        dependencies=[Depends(require_admin)],
+        responses=PAGINATED_RESPONSE_DOCS,
     )
     def list_raw_research_evidence(
+        response: Response,
         status: str | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
         if status is not None and status not in {"pending", "approved", "rejected"}:
@@ -732,12 +908,17 @@ def create_app(
             FROM raw_research_evidence e
             JOIN research_evidence_sources s ON s.source_id = e.source_id
         """
-        parameters: tuple[Any, ...] = ()
+        parameters: list[Any] = []
+        count_query = "SELECT COUNT(*) AS count FROM raw_research_evidence e"
         if status is not None:
             query += " WHERE e.review_status = ?"
-            parameters = (status,)
-        query += " ORDER BY e.published_at DESC, e.raw_evidence_id"
-        rows = _rows(db.fetch_all(query, parameters))
+            count_query += " WHERE e.review_status = ?"
+            parameters.append(status)
+        total = db.fetch_all(count_query, tuple(parameters))[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
+        query += " ORDER BY e.published_at DESC, e.raw_evidence_id LIMIT ? OFFSET ?"
+        parameters.extend((limit, offset))
+        rows = _rows(db.fetch_all(query, tuple(parameters)))
         for row in rows:
             row["asset_symbols"] = json.loads(row["asset_symbols"])
         return rows
@@ -746,17 +927,24 @@ def create_app(
         "/evidence-collection-runs",
         tags=["research"],
         dependencies=[Depends(require_admin)],
+        responses=PAGINATED_RESPONSE_DOCS,
     )
     def list_evidence_collection_runs(
+        response: Response,
         limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
         db: Database = Depends(get_database),
     ) -> list[dict[str, Any]]:
+        total = db.fetch_all(
+            "SELECT COUNT(*) AS count FROM evidence_collection_runs"
+        )[0]["count"]
+        _pagination_headers(response, total=total, limit=limit, offset=offset)
         return _rows(db.fetch_all(
             """
             SELECT * FROM evidence_collection_runs
-            ORDER BY started_at DESC LIMIT ?
+            ORDER BY started_at DESC LIMIT ? OFFSET ?
             """,
-            (limit,),
+            (limit, offset),
         ))
 
     @app.post(

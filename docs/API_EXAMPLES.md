@@ -218,3 +218,43 @@ Invoke-RestMethod "$baseUrl/research/research-2026w30/finalize" `
 | `404` | 产品或工作流不存在 |
 | `409` | 唯一约束或幂等键冲突 |
 | `422` | 输入或领域规则不合法 |
+
+## 12. 分页与错误契约
+
+主要运行记录接口支持 `limit` 和 `offset`，响应正文继续保持数组以兼容已有客户端：
+
+```powershell
+$response = Invoke-WebRequest "$baseUrl/pipeline-runs?limit=20&offset=0"
+$response.Headers["X-Total-Count"]
+$response.Headers["X-Limit"]
+$response.Headers["X-Offset"]
+```
+
+适用接口包括运营周期、生产管道、计划任务、告警、模型调用、审计事件、原始研究
+证据和证据采集运行。
+
+所有 API 错误均返回兼容的 `detail`，以及机器可读结构：
+
+```json
+{
+  "detail": "committee decision requires at least 2 opinions",
+  "error": {
+    "code": "DOMAIN_RULE_VIOLATION",
+    "message": "committee decision requires at least 2 opinions",
+    "request_id": "request-id",
+    "issues": []
+  }
+}
+```
+
+常用错误码包括：
+
+- `AUTHENTICATION_REQUIRED`
+- `PERMISSION_DENIED`
+- `RESOURCE_NOT_FOUND`
+- `RESOURCE_CONFLICT`
+- `DOMAIN_RULE_VIOLATION`
+- `VALIDATION_ERROR`
+
+客户端可以通过 `X-Request-ID` 传入自己的请求 ID；服务端会在响应头和错误正文中
+返回相同 ID。未提供时由服务端生成。
