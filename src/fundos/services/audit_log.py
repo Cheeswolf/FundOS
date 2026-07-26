@@ -24,7 +24,7 @@ def event_hash(event: dict[str, Any], previous_hash: str) -> str:
 
 def record_audit_event(database: Database, event: dict[str, Any]) -> str:
     with database.connect() as connection:
-        connection.execute("BEGIN IMMEDIATE")
+        database.begin_idempotent_write(connection, "audit-chain")
         previous = connection.execute(
             "SELECT event_hash FROM api_audit_events ORDER BY created_at DESC, audit_id DESC LIMIT 1"
         ).fetchone()
@@ -73,7 +73,7 @@ def purge_audit_events(database: Database, *, retention_days: int) -> int:
         raise ValueError("audit retention must be at least 30 days")
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     with database.connect() as connection:
-        connection.execute("BEGIN IMMEDIATE")
+        database.begin_idempotent_write(connection, "audit-retention")
         last = connection.execute(
             """
             SELECT audit_id, event_hash FROM api_audit_events

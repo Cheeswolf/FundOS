@@ -32,6 +32,7 @@
 - [ ] `python scripts/check_postgres.py` 返回 `ready: true`；
 - [ ] `python scripts/initialize_postgres.py` 完成且 schema version 为 14；
 - [ ] CI `postgres-integration` 作业通过；
+- [ ] PostgreSQL 完整业务契约、并发幂等和失败回滚用例通过；
 - [ ] SQLite 已备份，API 与调度写入已停止；
 - [ ] 搬迁报告中所有表的数量和 SHA-256 摘要验证通过；
 - [ ] PostgreSQL identity 序列已校正；

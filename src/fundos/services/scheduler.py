@@ -100,7 +100,10 @@ def _acquire_lease(
     lease_until: datetime,
 ) -> bool:
     with database.connect() as connection:
-        connection.execute("BEGIN IMMEDIATE")
+        database.begin_idempotent_write(
+            connection,
+            f"scheduled-job:{job_name}",
+        )
         existing = connection.execute(
             "SELECT * FROM scheduled_job_locks WHERE job_name = ?",
             (job_name,),

@@ -15,7 +15,9 @@ FundOS 当前运行时仍使用 SQLite。仓库已经具备 PostgreSQL 16 本地
    PostgreSQL 16 上验证建表、API 写入、原子幂等和读取；
 5. **数据搬迁（工具已完成，待实际执行）**：停写后锁定 SQLite，按外键顺序在单一
    事务中导入空 PostgreSQL，校正 identity 序列，并逐表核对数量和 SHA-256 摘要；
-6. **完整双环境验收**：在 SQLite 和 PostgreSQL 分别运行领域、API、调度和并发测试；
+6. **完整双环境自动验收（已完成）**：同一业务契约在 SQLite 和 PostgreSQL 验证
+   投研、提案、风控、投委会、发布、净值、基准、调度锁和审计链；PostgreSQL
+   另验证并发幂等和失败回滚；
 7. **切换与回退**：备份、停写、最终增量导入、切换连接、冒烟检查；失败则切回
    SQLite 只读副本。
 
@@ -56,7 +58,7 @@ SQLite；配置 `postgresql://...` 时使用 PostgreSQL。`FUNDOS_POSTGRES_URL` 
 搬迁和完整双环境验收。
 
 CI 的 `postgres-integration` 作业会启动临时 PostgreSQL 16，并运行最小 API
-集成测试以及 SQLite 搬迁验收。本地可使用：
+集成测试、SQLite 搬迁验收和完整业务契约。本地可使用：
 
 ```powershell
 $env:FUNDOS_TEST_POSTGRES_URL = $env:FUNDOS_POSTGRES_URL

@@ -100,4 +100,8 @@ jobs:
           python -m pip install -e ".[test,postgres]"
 
       - name: Run PostgreSQL API integration test
-        run: python -m unittest tests.test_postgres_integration -v
+        run: >-
+          python -m unittest
+          tests.test_postgres_integration
+          tests.test_database_contract.PostgresDatabaseContractTests
+          -v
