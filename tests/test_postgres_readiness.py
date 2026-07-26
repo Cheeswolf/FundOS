@@ -143,6 +143,40 @@ class PostgresReadinessTests(unittest.TestCase):
             ("INSERT INTO assets VALUES (%s, %s)", [("A", "Asset")]),
         )
 
+    def test_reads_postgres_table_columns_in_ordinal_order(self) -> None:
+        class Result:
+            def fetchall(self):
+                return [
+                    {"column_name": "audit_id"},
+                    {"column_name": "request_id"},
+                ]
+
+        class RawConnection:
+            def execute(self, query, parameters):
+                self.call = (query, parameters)
+                return Result()
+
+            def commit(self):
+                pass
+
+            def rollback(self):
+                pass
+
+            def close(self):
+                pass
+
+        raw = RawConnection()
+        database = PostgresDatabase(
+            "postgresql://localhost/fundos",
+            connector=lambda *_args, **_kwargs: raw,
+        )
+
+        columns = database.table_columns("api_audit_events")
+
+        self.assertEqual(columns, ["audit_id", "request_id"])
+        self.assertIn("information_schema.columns", raw.call[0])
+        self.assertEqual(raw.call[1], ("api_audit_events",))
+
 
 if __name__ == "__main__":
     unittest.main()

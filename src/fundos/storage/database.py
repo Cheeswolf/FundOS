@@ -1,4 +1,5 @@
 import sqlite3
+import re
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import date
@@ -427,6 +428,14 @@ class Database:
     def get_schema_version(self) -> int:
         rows = self.fetch_all("SELECT MAX(version) AS version FROM schema_migrations")
         return int(rows[0]["version"] or 0)
+
+    def table_columns(self, table_name: str) -> list[str]:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name) is None:
+            raise ValueError("invalid table name")
+        return [
+            str(row["name"])
+            for row in self.fetch_all(f"PRAGMA table_info({table_name})")
+        ]
 
     def upsert_assets(self, assets: Iterable[Asset]) -> None:
         rows = [(asset.symbol, asset.name, asset.asset_class) for asset in assets]

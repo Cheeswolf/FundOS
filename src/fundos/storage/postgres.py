@@ -162,3 +162,15 @@ class PostgresDatabase(Database):
         key: str,
     ) -> None:
         self.dialect.begin_idempotent_write(connection, key)
+
+    def table_columns(self, table_name: str) -> list[str]:
+        rows = self.fetch_all(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = ?
+            ORDER BY ordinal_position
+            """,
+            (table_name,),
+        )
+        return [str(row["column_name"]) for row in rows]

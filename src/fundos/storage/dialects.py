@@ -45,6 +45,9 @@ class SQLiteDialect:
     def prepare(self, query: str) -> str:
         return query
 
+    def timestamp_expression(self, expression: str) -> str:
+        return f"datetime({expression})"
+
     def begin_idempotent_write(
         self,
         connection: ExecutableConnection,
@@ -60,6 +63,9 @@ class PostgresDialect:
 
     def prepare(self, query: str) -> str:
         return qmark_to_postgres(query)
+
+    def timestamp_expression(self, expression: str) -> str:
+        return f"CAST({expression} AS TIMESTAMPTZ)"
 
     def begin_idempotent_write(
         self,

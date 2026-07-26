@@ -64,6 +64,16 @@ class DatabaseDialectTests(unittest.TestCase):
             ],
         )
 
+    def test_timestamp_expressions_are_backend_specific(self) -> None:
+        self.assertEqual(
+            SQLiteDialect().timestamp_expression("created_at"),
+            "datetime(created_at)",
+        )
+        self.assertEqual(
+            PostgresDialect().timestamp_expression("created_at"),
+            "CAST(created_at AS TIMESTAMPTZ)",
+        )
+
     def test_sqlite_integrity_error_remains_supported(self) -> None:
         self.assertTrue(issubclass(sqlite3.IntegrityError, INTEGRITY_ERRORS))
 

@@ -7,8 +7,8 @@ FundOS 当前运行时仍使用 SQLite。仓库已经具备 PostgreSQL 16 本地
 ## 阶段
 
 1. **目标环境预检（已完成）**：固定 PostgreSQL 16，检查连接、版本、SSL 和建表权限；
-2. **兼容存储层（进行中）**：DB-API 连接、`?` 参数、完整性异常和幂等事务锁方言
-   已完成；仍需替换 `PRAGMA`、`AUTOINCREMENT` 和 SQLite 日期函数；
+2. **兼容存储层（已完成）**：DB-API 连接、`?` 参数、完整性异常、时间表达式、
+   元数据查询、identity 主键返回和幂等事务锁均已抽象；
 3. **正式迁移基线（已完成）**：当前完整结构转换为 PostgreSQL DDL，按逻辑版本
    14 事务执行并写入 `schema_migrations`；后续结构变化继续追加迁移；
 4. **数据搬迁**：停写后导出 SQLite，按外键顺序导入 PostgreSQL并核对数量和摘要；
@@ -47,5 +47,5 @@ python scripts/initialize_postgres.py
 取得事务级 advisory lock。`initialize()` 会在一个事务中幂等应用 PostgreSQL
 schema 基线；执行失败时不会留下部分建表结果。
 
-这仍不代表 API 可以切换到 PostgreSQL：业务查询中的 SQLite 日期函数和元数据查询
-尚未全部替换，也尚未执行双数据库 API 验收。
+这仍不代表 API 可以切换到 PostgreSQL：尚未把 API 启动配置接到
+`FUNDOS_POSTGRES_URL`，也尚未执行真实 PostgreSQL 上的双数据库 API 验收。

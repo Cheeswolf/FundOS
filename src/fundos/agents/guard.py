@@ -59,12 +59,14 @@ class GuardedLanguageModel:
                 (self.provider_name, self.model_name),
             )
             reset_at = resets[0]["reset_at"] if resets else ""
+            timestamp = self.database.dialect.timestamp_expression
             recent = self.database.fetch_all(
-                """
+                f"""
                 SELECT status FROM model_calls
                 WHERE provider = ? AND model = ?
-                  AND datetime(created_at) > COALESCE(datetime(?), '0001-01-01 00:00:00')
-                ORDER BY datetime(created_at) DESC LIMIT ?
+                  AND {timestamp("created_at")} >
+                      COALESCE({timestamp("?")}, {timestamp("'0001-01-01 00:00:00'")})
+                ORDER BY {timestamp("created_at")} DESC LIMIT ?
                 """,
                 (self.provider_name, self.model_name, reset_at, self.circuit_failure_threshold),
             )

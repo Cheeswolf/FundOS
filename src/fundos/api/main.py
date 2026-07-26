@@ -963,7 +963,7 @@ def create_app(
     def export_audit_events(db: Database = Depends(get_database)) -> StreamingResponse:
         rows = db.fetch_all("SELECT * FROM api_audit_events ORDER BY created_at, audit_id")
         output = io.StringIO()
-        columns = [item[1] for item in db.fetch_all("PRAGMA table_info(api_audit_events)")]
+        columns = db.table_columns("api_audit_events")
         writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
         writer.writeheader()
         writer.writerows(dict(row) for row in rows)
