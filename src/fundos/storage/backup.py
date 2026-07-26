@@ -14,7 +14,7 @@ from typing import Any
 
 CRITICAL_TABLES = (
     "portfolio_products", "portfolio_versions", "research_reports", "workflow_runs",
-    "portfolio_nav", "api_audit_events",
+    "committee_opinions", "portfolio_nav", "api_audit_events",
 )
 
 

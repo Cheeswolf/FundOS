@@ -91,6 +91,16 @@ class CommitteeDecisionInput(BaseModel):
     approved: bool
     rationale: str = Field(min_length=1)
     decided_by: str = Field(min_length=1)
+    minimum_opinions: int = Field(default=0, ge=0, le=20)
+
+
+class CommitteeOpinionInput(BaseModel):
+    member_role: str = Field(min_length=1)
+    recommendation: Literal["approve", "reject", "abstain"]
+    rationale: str = Field(min_length=1)
+    alternative_weights: list[WeightInput] = Field(default_factory=list)
+    conditions: str = ""
+    submitted_by: str = Field(min_length=1)
 
 
 class CircuitResetInput(BaseModel):

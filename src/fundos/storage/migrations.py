@@ -258,6 +258,25 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
             """
         )
 
+    def add_committee_opinions(target: sqlite3.Connection) -> None:
+        target.execute(
+            """
+            CREATE TABLE IF NOT EXISTS committee_opinions (
+                opinion_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES workflow_runs(run_id),
+                member_role TEXT NOT NULL,
+                recommendation TEXT NOT NULL
+                    CHECK (recommendation IN ('approve', 'reject', 'abstain')),
+                rationale TEXT NOT NULL,
+                alternative_weights TEXT NOT NULL DEFAULT '{}',
+                conditions TEXT NOT NULL DEFAULT '',
+                submitted_by TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (run_id, member_role)
+            )
+            """
+        )
+
     migrations = (
         Migration(1, "create_current_schema", create_current_schema),
         Migration(2, "upgrade_legacy_columns", upgrade_legacy_columns),
@@ -271,6 +290,7 @@ def apply_migrations(connection: sqlite3.Connection, schema: str) -> int:
         Migration(10, "add_raw_research_evidence_store", add_raw_research_evidence_store),
         Migration(11, "add_evidence_collection_runs", add_evidence_collection_runs),
         Migration(12, "add_scheduled_job_control", add_scheduled_job_control),
+        Migration(13, "add_committee_opinions", add_committee_opinions),
     )
     applied = {row[0] for row in connection.execute("SELECT version FROM schema_migrations")}
     for migration in migrations:

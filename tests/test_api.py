@@ -45,6 +45,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("决策操作", response.text)
         self.assertIn("proposalForm", response.text)
         self.assertIn("/committee-decision", response.text)
+        self.assertIn("/committee-opinions", response.text)
+        self.assertIn("minimum_opinions:2", response.text)
         self.assertIn("Idempotency-Key", response.text)
 
     def test_lists_and_gets_product(self) -> None:
@@ -399,10 +401,24 @@ class ApiTests(unittest.TestCase):
         })
         self.assertEqual(risk.status_code, 200)
         self.assertTrue(risk.json()["passed"])
+        opinion = self.client.post(
+            "/workflows/RUN1/committee-opinions",
+            headers=self.write_headers,
+            json={
+                "member_role": "risk",
+                "recommendation": "approve",
+                "rationale": "All hard limits passed.",
+                "alternative_weights": [],
+                "conditions": "",
+                "submitted_by": "risk-officer",
+            },
+        )
+        self.assertEqual(opinion.status_code, 201)
         decision = self.client.post("/workflows/RUN1/committee-decision", headers=self.write_headers, json={
             "approved": True,
             "rationale": "All constraints passed.",
             "decided_by": "investment-committee",
+            "minimum_opinions": 1,
         })
         self.assertEqual(decision.status_code, 200)
         publish_headers = {**self.write_headers, "Idempotency-Key": "publish-RUN1"}
@@ -414,6 +430,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(repeated_publish.json(), published.json())
         workflow = self.client.get("/workflows/RUN1").json()
         self.assertEqual(workflow["run"]["state"], "published")
+        self.assertEqual(workflow["committee_opinions"][0]["member_role"], "risk")
+        self.assertEqual(workflow["committee_opinions"][0]["alternative_weights"], {})
 
     def test_operator_can_finalize_draft_research(self) -> None:
         self.client.post("/assets", headers=self.write_headers, json=[

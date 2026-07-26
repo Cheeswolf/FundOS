@@ -21,6 +21,7 @@ from fundos.api.schemas import (
     AlertLifecycleInput,
     CircuitResetInput,
     CommitteeDecisionInput,
+    CommitteeOpinionInput,
     EvidenceReviewInput,
     PriceBatchInput,
     ProductCreate,
@@ -48,6 +49,7 @@ from fundos.services import (
     purge_audit_events,
     record_audit_event,
     record_committee_decision,
+    record_committee_opinion,
     reset_model_circuit,
     run_risk_review,
     update_alert_lifecycle,
@@ -59,6 +61,20 @@ from fundos.storage import Database
 
 def _rows(rows: list[Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
+
+
+def _committee_opinions(database: Database, run_id: str) -> list[dict[str, Any]]:
+    opinions = _rows(database.fetch_all(
+        """
+        SELECT opinion_id, run_id, member_role, recommendation, rationale,
+               alternative_weights, conditions, submitted_by, created_at
+        FROM committee_opinions WHERE run_id = ? ORDER BY created_at, member_role
+        """,
+        (run_id,),
+    ))
+    for opinion in opinions:
+        opinion["alternative_weights"] = json.loads(opinion["alternative_weights"])
+    return opinions
 
 
 def get_database(request: Request) -> Database:
@@ -342,10 +358,40 @@ def create_app(
             decision = record_committee_decision(
                 db, run_id=run_id, approved=payload.approved,
                 rationale=payload.rationale, decided_by=payload.decided_by,
+                minimum_opinions=payload.minimum_opinions,
             )
         except (ValueError, sqlite3.IntegrityError) as error:
             raise _domain_error(error) from error
         return {"run_id": run_id, "decision": decision}
+
+    @app.post(
+        "/workflows/{run_id}/committee-opinions",
+        status_code=201,
+        tags=["workflow"],
+        dependencies=[Depends(require_admin)],
+    )
+    def submit_committee_opinion(
+        run_id: str,
+        payload: CommitteeOpinionInput,
+        db: Database = Depends(get_database),
+    ) -> dict[str, str]:
+        try:
+            opinion_id = record_committee_opinion(
+                db,
+                run_id=run_id,
+                member_role=payload.member_role,
+                recommendation=payload.recommendation,
+                rationale=payload.rationale,
+                alternative_weights={
+                    item.asset_symbol: float(item.weight)
+                    for item in payload.alternative_weights
+                },
+                conditions=payload.conditions,
+                submitted_by=payload.submitted_by,
+            )
+        except (ValueError, sqlite3.IntegrityError) as error:
+            raise _domain_error(error) from error
+        return {"opinion_id": opinion_id, "run_id": run_id}
 
     @app.post("/workflows/{run_id}/publish", tags=["workflow"], dependencies=[Depends(require_admin)])
     def publish_workflow(
@@ -762,10 +808,12 @@ def create_app(
         proposal = db.fetch_all("SELECT * FROM portfolio_proposals WHERE run_id = ?", (run_id,))
         checks = _rows(db.fetch_all("SELECT * FROM risk_checks WHERE run_id = ? ORDER BY check_id", (run_id,)))
         decision = db.fetch_all("SELECT * FROM committee_decisions WHERE run_id = ?", (run_id,))
+        opinions = _committee_opinions(db, run_id)
         return {
             "run": dict(runs[0]),
             "proposal": dict(proposal[0]) if proposal else None,
             "risk_checks": checks,
+            "committee_opinions": opinions,
             "committee_decision": dict(decision[0]) if decision else None,
         }
 
@@ -786,6 +834,7 @@ def create_app(
                 "risk_checks": _rows(db.fetch_all(
                     "SELECT * FROM risk_checks WHERE run_id = ? ORDER BY check_id", (run_id,)
                 )),
+                "committee_opinions": _committee_opinions(db, run_id),
                 "committee_decision": dict(decision[0]) if decision else None,
             })
         return result

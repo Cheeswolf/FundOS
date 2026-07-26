@@ -142,15 +142,32 @@ Invoke-RestMethod "$baseUrl/workflows/workflow-2026w30/risk-review" `
 ## 8. 投委会决定
 
 ```powershell
+$opinion = @{
+  member_role = "risk"
+  recommendation = "approve"
+  rationale = "硬性风险规则全部通过。"
+  alternative_weights = @()
+  conditions = "若组合波动率显著上升则重新审查。"
+  submitted_by = "risk-officer"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod "$baseUrl/workflows/workflow-2026w30/committee-opinions" `
+  -Method Post -Headers $headers -ContentType "application/json" -Body $opinion
+
 $body = @{
   approved = $true
-  rationale = "全部硬性风险规则通过，同意发布。"
-  decided_by = "investment-committee"
+  rationale = "已审阅研究和风险委员意见，同意发布。"
+  decided_by = "committee-chair"
+  minimum_opinions = 2
 } | ConvertTo-Json
 
 Invoke-RestMethod "$baseUrl/workflows/workflow-2026w30/committee-decision" `
   -Method Post -Headers $headers -ContentType "application/json" -Body $body
 ```
+
+每个 `member_role` 对同一工作流只能提交一次不可变意见。意见可以是
+`approve`、`reject` 或 `abstain`，并可附带覆盖全部提案资产且合计为 100%
+的备选权重。最终决策与委员意见分开保存，主席需要在最终依据中说明如何处理分歧。
 
 ## 9. 发布组合
 

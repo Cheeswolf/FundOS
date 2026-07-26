@@ -15,12 +15,12 @@ class MigrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             database = Database(Path(directory) / "migration.sqlite3")
             database.initialize()
-            self.assertEqual(database.get_schema_version(), 12)
+            self.assertEqual(database.get_schema_version(), 13)
             database.initialize()
             migrations = database.fetch_all("SELECT * FROM schema_migrations ORDER BY version")
             self.assertEqual(
                 [row["version"] for row in migrations],
-                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+                [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
             )
 
     def test_upgrades_model_call_table_created_before_cost_tracking(self) -> None:
@@ -60,7 +60,7 @@ class MigrationTests(unittest.TestCase):
                 row["name"] for row in database.fetch_all("PRAGMA table_info(model_calls)")
             }
             self.assertIn("estimated_cost_usd", columns)
-            self.assertEqual(database.get_schema_version(), 12)
+            self.assertEqual(database.get_schema_version(), 13)
 
 
 if __name__ == "__main__":

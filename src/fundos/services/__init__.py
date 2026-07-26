@@ -28,6 +28,7 @@ from .workflow import (
     RiskReviewReport,
     create_proposal,
     publish_approved_workflow,
+    record_committee_opinion,
     record_committee_decision,
     run_risk_review,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "RiskReviewReport",
     "create_proposal",
     "publish_approved_workflow",
+    "record_committee_opinion",
     "record_committee_decision",
     "run_risk_review",
 ]
